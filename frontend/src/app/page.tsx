@@ -77,8 +77,9 @@ export default function LandingPage() {
               <span className={styles.ring} />
             </div>
             <div className={styles.brandText}>
-              <div className={styles.product}>Dojo Manager</div>
-              <div className={styles.tag}>BJJ 운영을 더 빠르고 정확하게</div>
+              <div className={styles.product}>BJJ Dojo Manager</div>
+              {/* ✅ English-only tag line */}
+              <div className={styles.tag}>Run your dojo faster. Track everything with confidence.</div>
             </div>
           </div>
 
@@ -90,16 +91,16 @@ export default function LandingPage() {
         </header>
 
         <section className={styles.hero}>
-          <p className={styles.kicker}>OPERATE • TRACK • GROW</p>
+          <p className={styles.kicker}>ATTENDANCE • SCHEDULING • MEMBERSHIPS</p>
 
           <h1 className={styles.title}>
             <span className={styles.titleLine}>Train</span>
             <span className={styles.titleLine}>Smarter.</span>
-            <span className={styles.titleLineMuted}>Run the dojo like a product.</span>
+            <span className={styles.titleLineMuted}>Run your dojo with clarity.</span>
           </h1>
 
           <p className={styles.sub}>
-            Attendance, memberships, schedules, and staff workflows — streamlined for modern gyms.
+            Attendance, memberships, schedules, announcements, and staff workflows — built for Brazilian Jiu-Jitsu gyms.
           </p>
 
           <div className={styles.ctaWrap} aria-hidden="true">
