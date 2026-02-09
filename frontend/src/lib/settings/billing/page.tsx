@@ -1,15 +1,13 @@
 // app/dojos/[dojoId]/settings/billing/page.tsx
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
 import Navigation, { BottomNavigation } from '@/components/Navigation';
 import {
   PLANS,
   FEATURE_COMPARISON,
-  formatPrice,
-  getYearlyDiscount,
   PlanType,
   BillingPeriod,
 } from '@/lib/stripe/config';
@@ -17,7 +15,6 @@ import {
   SubscriptionInfo,
   getUsagePercentage,
   formatLimit,
-  canAdd,
   getUpgradeRecommendation,
 } from '@/lib/stripe/plan-limits';
 
@@ -26,6 +23,7 @@ const GO_API_URL = process.env.NEXT_PUBLIC_GO_API_URL || '';
 export default function BillingPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const dojoId = typeof params?.dojoId === 'string' ? params.dojoId : '';
 
@@ -36,6 +34,24 @@ export default function BillingPage() {
   const [portalLoading, setPortalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ✅ Query param banners (既存ロジックは壊さず表示だけ追加)
+  const banner = useMemo(() => {
+    const success = searchParams?.get('success');
+    const canceled = searchParams?.get('canceled');
+    const pmUpdated = searchParams?.get('pm_updated');
+
+    if (pmUpdated === '1') {
+      return { kind: 'success' as const, text: 'Card updated successfully.' };
+    }
+    if (success === 'true') {
+      return { kind: 'success' as const, text: 'Checkout completed successfully.' };
+    }
+    if (canceled === 'true') {
+      return { kind: 'info' as const, text: 'Checkout was canceled.' };
+    }
+    return null;
+  }, [searchParams]);
+
   // Fetch subscription info
   useEffect(() => {
     if (!user || !dojoId) return;
@@ -43,6 +59,8 @@ export default function BillingPage() {
     const fetchSubscription = async () => {
       try {
         setLoading(true);
+        setError(null);
+
         const token = await user.getIdToken();
         const res = await fetch(`${GO_API_URL}/v1/dojos/${dojoId}/subscription`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -75,13 +93,14 @@ export default function BillingPage() {
     fetchSubscription();
   }, [user, dojoId]);
 
-  // Handle plan selection
+  // Handle plan selection (Checkout)
   const handleSelectPlan = async (plan: PlanType) => {
     if (!user || !dojoId || plan === 'free') return;
 
     try {
       setCheckoutLoading(plan);
       setError(null);
+
       const token = await user.getIdToken();
 
       const res = await fetch(`${GO_API_URL}/v1/stripe/create-checkout`, {
@@ -113,13 +132,14 @@ export default function BillingPage() {
     }
   };
 
-  // Handle manage billing (open Stripe portal)
+  // Handle manage billing (Stripe customer portal)
   const handleManageBilling = async () => {
     if (!user || !dojoId) return;
 
     try {
       setPortalLoading(true);
       setError(null);
+
       const token = await user.getIdToken();
 
       const res = await fetch(`${GO_API_URL}/v1/stripe/create-portal`, {
@@ -148,6 +168,12 @@ export default function BillingPage() {
     }
   };
 
+  // ✅ NEW: go to in-app payment method page
+  const handleUpdateCard = () => {
+    if (!dojoId) return;
+    router.push(`/dojos/${dojoId}/settings/billing/payment-method`);
+  };
+
   const currentPlan = subscription?.plan || 'free';
   const upgradeRecommendation = subscription ? getUpgradeRecommendation(subscription) : null;
 
@@ -170,10 +196,21 @@ export default function BillingPage() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900">Billing & Plans</h1>
-          <p className="text-gray-600 mt-2">
-            Manage your subscription and view usage
-          </p>
+          <p className="text-gray-600 mt-2">Manage your subscription and view usage</p>
         </div>
+
+        {/* ✅ Banner */}
+        {banner && (
+          <div
+            className={[
+              'px-4 py-3 rounded-lg mb-6 border',
+              banner.kind === 'success' ? 'bg-green-50 border-green-200 text-green-800' : '',
+              banner.kind === 'info' ? 'bg-blue-50 border-blue-200 text-blue-800' : '',
+            ].join(' ')}
+          >
+            {banner.text}
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
@@ -189,24 +226,25 @@ export default function BillingPage() {
           <>
             {/* Current Plan Card */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-8">
-              <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-start justify-between flex-wrap gap-4">
                 <div>
                   <p className="text-sm text-gray-500">Current Plan</p>
                   <div className="flex items-center gap-3 mt-1">
-                    <h2 className="text-2xl font-bold text-gray-900">
-                      {PLANS[currentPlan].name}
-                    </h2>
+                    <h2 className="text-2xl font-bold text-gray-900">{PLANS[currentPlan].name}</h2>
+
                     {currentPlan !== 'free' && subscription?.status === 'active' && (
                       <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
                         Active
                       </span>
                     )}
+
                     {subscription?.cancelAtPeriodEnd && (
                       <span className="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full">
                         Cancels at period end
                       </span>
                     )}
                   </div>
+
                   {subscription?.periodEnd && currentPlan !== 'free' && (
                     <p className="text-sm text-gray-500 mt-1">
                       {subscription.cancelAtPeriodEnd ? 'Access until' : 'Renews'}{' '}
@@ -214,15 +252,26 @@ export default function BillingPage() {
                     </p>
                   )}
                 </div>
-                {currentPlan !== 'free' && (
+
+                {/* ✅ Buttons */}
+                <div className="flex items-center gap-2">
                   <button
-                    onClick={handleManageBilling}
-                    disabled={portalLoading}
-                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition disabled:opacity-50"
+                    onClick={handleUpdateCard}
+                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
                   >
-                    {portalLoading ? 'Loading...' : 'Manage Billing'}
+                    Add / Update Card
                   </button>
-                )}
+
+                  {currentPlan !== 'free' && (
+                    <button
+                      onClick={handleManageBilling}
+                      disabled={portalLoading}
+                      className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition disabled:opacity-50"
+                    >
+                      {portalLoading ? 'Loading...' : 'Manage Billing'}
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Usage Stats */}
@@ -285,8 +334,7 @@ export default function BillingPage() {
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
-                  Yearly
-                  <span className="ml-1 text-green-600 text-xs">Save 17%</span>
+                  Yearly <span className="ml-1 text-green-600 text-xs">Save 17%</span>
                 </button>
               </div>
             </div>
@@ -317,18 +365,16 @@ export default function BillingPage() {
                     <div className="text-center mb-6">
                       <h3 className="text-xl font-bold text-gray-900">{config.name}</h3>
                       <p className="text-gray-500 text-sm mt-1">{config.description}</p>
+
                       <div className="mt-4">
                         <span className="text-4xl font-bold text-gray-900">
                           {price === 0 ? 'Free' : `$${billingPeriod === 'yearly' ? Math.round(price / 12) : price}`}
                         </span>
-                        {price > 0 && (
-                          <span className="text-gray-500">/mo</span>
-                        )}
+                        {price > 0 && <span className="text-gray-500">/mo</span>}
                       </div>
+
                       {billingPeriod === 'yearly' && price > 0 && (
-                        <p className="text-sm text-gray-500 mt-1">
-                          ${price} billed yearly
-                        </p>
+                        <p className="text-sm text-gray-500 mt-1">${price} billed yearly</p>
                       )}
                     </div>
 
@@ -341,12 +387,7 @@ export default function BillingPage() {
                             stroke="currentColor"
                             viewBox="0 0 24 24"
                           >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M5 13l4 4L19 7"
-                            />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                           </svg>
                           <span className="text-gray-600 text-sm">{feature}</span>
                         </li>
@@ -406,58 +447,33 @@ export default function BillingPage() {
               <div className="px-6 py-4 border-b border-gray-200">
                 <h3 className="text-lg font-semibold text-gray-900">Feature Comparison</h3>
               </div>
+
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">
-                        Feature
-                      </th>
-                      <th className="px-6 py-3 text-center text-sm font-medium text-gray-500">
-                        Free
-                      </th>
-                      <th className="px-6 py-3 text-center text-sm font-medium text-gray-500">
-                        Pro
-                      </th>
-                      <th className="px-6 py-3 text-center text-sm font-medium text-gray-500">
-                        Business
-                      </th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Feature</th>
+                      <th className="px-6 py-3 text-center text-sm font-medium text-gray-500">Free</th>
+                      <th className="px-6 py-3 text-center text-sm font-medium text-gray-500">Pro</th>
+                      <th className="px-6 py-3 text-center text-sm font-medium text-gray-500">Business</th>
                     </tr>
                   </thead>
+
                   <tbody className="divide-y divide-gray-200">
                     {FEATURE_COMPARISON.map((feature, idx) => (
                       <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                         <td className="px-6 py-4 text-sm text-gray-900">{feature.name}</td>
+
                         {(['free', 'pro', 'business'] as const).map((plan) => (
                           <td key={plan} className="px-6 py-4 text-center">
                             {typeof feature[plan] === 'boolean' ? (
                               feature[plan] ? (
-                                <svg
-                                  className="w-5 h-5 text-green-500 mx-auto"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M5 13l4 4L19 7"
-                                  />
+                                <svg className="w-5 h-5 text-green-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                 </svg>
                               ) : (
-                                <svg
-                                  className="w-5 h-5 text-gray-300 mx-auto"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M6 18L18 6M6 6l12 12"
-                                  />
+                                <svg className="w-5 h-5 text-gray-300 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                 </svg>
                               )
                             ) : (
@@ -477,40 +493,32 @@ export default function BillingPage() {
               <h3 className="text-xl font-bold text-gray-900 mb-6">Frequently Asked Questions</h3>
               <div className="space-y-4">
                 <details className="bg-white rounded-lg border border-gray-200 p-4">
-                  <summary className="font-medium text-gray-900 cursor-pointer">
-                    Can I change plans anytime?
-                  </summary>
+                  <summary className="font-medium text-gray-900 cursor-pointer">Can I change plans anytime?</summary>
                   <p className="mt-3 text-gray-600 text-sm">
-                    Yes! You can upgrade or downgrade your plan at any time. When upgrading, you'll be
-                    charged the prorated difference. When downgrading, the credit will be applied to
-                    future invoices.
+                    Yes! You can upgrade or downgrade your plan at any time. When upgrading, you'll be charged the prorated difference.
+                    When downgrading, the credit will be applied to future invoices.
                   </p>
                 </details>
+
                 <details className="bg-white rounded-lg border border-gray-200 p-4">
-                  <summary className="font-medium text-gray-900 cursor-pointer">
-                    What happens when I exceed my plan limits?
-                  </summary>
+                  <summary className="font-medium text-gray-900 cursor-pointer">What happens when I exceed my plan limits?</summary>
                   <p className="mt-3 text-gray-600 text-sm">
-                    You won't be able to add more resources (members, staff, etc.) until you upgrade
-                    your plan. Your existing data is always safe and accessible.
+                    You won't be able to add more resources (members, staff, etc.) until you upgrade your plan. Your existing data is always safe and accessible.
                   </p>
                 </details>
+
                 <details className="bg-white rounded-lg border border-gray-200 p-4">
-                  <summary className="font-medium text-gray-900 cursor-pointer">
-                    Is there a free trial for paid plans?
-                  </summary>
+                  <summary className="font-medium text-gray-900 cursor-pointer">Is there a free trial for paid plans?</summary>
                   <p className="mt-3 text-gray-600 text-sm">
-                    The Free plan lets you try all core features with limited capacity. This way,
-                    you can evaluate the platform before committing to a paid plan.
+                    The Free plan lets you try all core features with limited capacity. This way, you can evaluate the platform before committing to a paid plan.
                   </p>
                 </details>
+
                 <details className="bg-white rounded-lg border border-gray-200 p-4">
-                  <summary className="font-medium text-gray-900 cursor-pointer">
-                    How do I cancel my subscription?
-                  </summary>
+                  <summary className="font-medium text-gray-900 cursor-pointer">How do I cancel my subscription?</summary>
                   <p className="mt-3 text-gray-600 text-sm">
-                    Click "Manage Billing" above to access the Stripe customer portal where you can
-                    cancel your subscription. Your access continues until the end of the billing period.
+                    Click "Manage Billing" above to access the Stripe customer portal where you can cancel your subscription.
+                    Your access continues until the end of the billing period.
                   </p>
                 </details>
               </div>

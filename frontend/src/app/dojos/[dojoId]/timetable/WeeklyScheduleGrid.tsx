@@ -138,15 +138,9 @@ const WeeklyScheduleGrid = forwardRef<WeeklyScheduleGridRef, WeeklyScheduleGridP
       getGridElement: () => gridContainerRef.current,
     }));
 
-    const dayDates = useMemo(
-      () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
-      [weekStart]
-    );
+    const dayDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
 
-    const rows = useMemo(
-      () => Math.floor(((maxHour - minHour) * 60) / slotMin),
-      [maxHour, minHour, slotMin]
-    );
+    const rows = useMemo(() => Math.floor(((maxHour - minHour) * 60) / slotMin), [maxHour, minHour, slotMin]);
 
     const slotH = 26;
     const headerH = 42;
@@ -164,36 +158,36 @@ const WeeklyScheduleGrid = forwardRef<WeeklyScheduleGridRef, WeeklyScheduleGridP
       return classes.filter((c) => normalizeClassType(c.classType, c.title) === filterType);
     }, [classes, filterType]);
 
-const groupedByColumn = useMemo(() => {
-  const m = new Map<number, WeeklyClassItem[]>();
-  for (let i = 0; i < 7; i++) m.set(i, []);
+    const groupedByColumn = useMemo(() => {
+      const m = new Map<number, WeeklyClassItem[]>();
+      for (let i = 0; i < 7; i++) m.set(i, []);
 
-  // weekStart の曜日を取得
-  const weekStartDay = weekStart.getDay(); // 0=日曜, 1=月曜, ...
+      // weekStart の曜日を取得
+      const weekStartDay = weekStart.getDay(); // 0=日曜, 1=月曜, ...
 
-  for (const c of filteredClasses) {
-    let col = -1;
+      for (const c of filteredClasses) {
+        let col = -1;
 
-    if (c.dateKey) {
-      const idx = dateKeyToIndex.get(c.dateKey);
-      if (typeof idx === "number") col = idx;
-    }
+        if (c.dateKey) {
+          const idx = dateKeyToIndex.get(c.dateKey);
+          if (typeof idx === "number") col = idx;
+        }
 
-    if (col < 0) {
-      // weekday から列インデックスを計算
-      // 例: weekStart=金曜(5), weekday=木曜(4) → col = (4 - 5 + 7) % 7 = 6
-      col = (c.weekday - weekStartDay + 7) % 7;
-    }
+        if (col < 0) {
+          // weekday から列インデックスを計算
+          // 例: weekStart=金曜(5), weekday=木曜(4) → col = (4 - 5 + 7) % 7 = 6
+          col = (c.weekday - weekStartDay + 7) % 7;
+        }
 
-    m.get(col)!.push(c);
-  }
+        m.get(col)!.push(c);
+      }
 
-  for (let i = 0; i < 7; i++) {
-    m.get(i)!.sort((a, b) => a.startMinute - b.startMinute);
-  }
+      for (let i = 0; i < 7; i++) {
+        m.get(i)!.sort((a, b) => a.startMinute - b.startMinute);
+      }
 
-  return m;
-}, [filteredClasses, dateKeyToIndex, weekStart]);
+      return m;
+    }, [filteredClasses, dateKeyToIndex, weekStart]);
 
     const timeLabels = useMemo(() => {
       const out: Array<{ minute: number; label: string }> = [];
@@ -293,8 +287,7 @@ const groupedByColumn = useMemo(() => {
                   style={{
                     height: gridH,
                     position: "relative",
-                    background:
-                      "linear-gradient(to bottom, rgba(15, 23, 42, 0.06) 1px, transparent 1px)",
+                    background: "linear-gradient(to bottom, rgba(15, 23, 42, 0.06) 1px, transparent 1px)",
                     backgroundSize: `100% ${slotH}px`,
                   }}
                   className={[
@@ -357,7 +350,9 @@ const groupedByColumn = useMemo(() => {
                           flexDirection: "column",
                           justifyContent: isVeryCompact ? "center" : "flex-start",
                         }}
-                        title={`${c.title}\n${minutesToHHMM(c.startMinute)} - ${minutesToHHMM(c.startMinute + c.durationMinute)}\n${c.instructor || ""}`}
+                        title={`${c.title}\n${minutesToHHMM(c.startMinute)} - ${minutesToHHMM(
+                          c.startMinute + c.durationMinute
+                        )}\n${c.instructor || ""}`}
                       >
                         {/* ✅ タイトル行 - 常に表示、フォントサイズ小さく */}
                         <div
@@ -404,9 +399,7 @@ const groupedByColumn = useMemo(() => {
                                 ) : isPast ? (
                                   <span className="font-semibold text-slate-600">Past</span>
                                 ) : (
-                                  <span className={`font-semibold ${typeConfig.textColor}`}>
-                                    {typeConfig.label}
-                                  </span>
+                                  <span className={`font-semibold ${typeConfig.textColor}`}>{typeConfig.label}</span>
                                 )}
                               </>
                             )}

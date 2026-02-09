@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useAuth } from "@/providers/AuthProvider";
+import Navigation, { BottomNavigation } from "@/components/Navigation";
+import { useDojoName } from "@/hooks/useDojoName";
 import { dbNullable, auth } from "@/firebase";
 import {
   doc,
@@ -44,22 +46,29 @@ type CreateMemberResponse = {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 const BELT_COLORS: Record<string, string> = {
-  white: "#FFFFFF",
-  blue: "#0066CC",
-  purple: "#6B3FA0",
-  brown: "#8B4513",
-  black: "#1A1A1A",
+  white: "#E5E7EB",
+  blue: "#2563EB",
+  purple: "#7C3AED",
+  brown: "#92400E",
+  black: "#1F2937",
 };
 
 const ROLE_LABELS: Record<string, string> = {
-  owner: "オーナー",
-  staff: "スタッフ",
-  coach: "コーチ",
-  student: "生徒",
+  owner: "Owner",
+  staff: "Staff",
+  coach: "Coach",
+  student: "Student",
+};
+
+const ROLE_BADGE_COLORS: Record<string, string> = {
+  owner: "bg-amber-100 text-amber-800",
+  staff: "bg-blue-100 text-blue-800",
+  coach: "bg-purple-100 text-purple-800",
+  student: "bg-gray-100 text-gray-700",
 };
 
 // ============================================
-// Small helpers
+// Helpers
 // ============================================
 
 function normalizeParam(v: unknown): string {
@@ -80,17 +89,13 @@ function pickFromParams(params: unknown, keys: string[]): string {
 function readDojoIdFromPathname(): string {
   if (typeof window === "undefined") return "";
   const parts = window.location.pathname.split("/").filter(Boolean);
-
-  // 想定: /dojos/<dojoId>/members
   const i = parts.indexOf("dojos");
-  if (i >= 0 && parts[i + 1]) {
-    return parts[i + 1] || "";
-  }
+  if (i >= 0 && parts[i + 1]) return parts[i + 1] || "";
   return "";
 }
 
 // ============================================
-// API Helper
+// API
 // ============================================
 
 async function createMemberApi(data: {
@@ -114,7 +119,6 @@ async function createMemberApi(data: {
     body: JSON.stringify(data),
   });
 
-  // JSON が返らないケースも一応ケア
   let json: any = {};
   try {
     json = await res.json();
@@ -148,18 +152,11 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
 
-  // ✅ dojoId 解決の優先順位: props → params → query → pathname
-  // ✅ params のキーゆらぎにも対応（dojoId / dojold など）
   const dojoId = useMemo(() => {
     const fromProps = (props?.dojoId || "").trim();
     if (fromProps) return fromProps;
 
-    const fromParams = pickFromParams(params, [
-      "dojoId",
-      "dojold", // もしここが違っていても拾える
-      "dojoID",
-      "dojoid",
-    ]);
+    const fromParams = pickFromParams(params, ["dojoId", "dojold", "dojoID", "dojoid"]);
     if (fromParams) return fromParams;
 
     const fromQuery =
@@ -167,9 +164,11 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
       (searchParams.get("dojold") || "").trim();
     if (fromQuery) return fromQuery;
 
-    const fromPath = readDojoIdFromPathname();
-    return fromPath;
+    return readDojoIdFromPathname();
   }, [props?.dojoId, params, searchParams]);
+
+  // Fetch dojo name
+  const { dojoName } = useDojoName(dojoId);
 
   const [members, setMembers] = useState<Member[]>([]);
   const [pendingMembers, setPendingMembers] = useState<Member[]>([]);
@@ -190,31 +189,28 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
   const [busy, setBusy] = useState(false);
   const [createdMember, setCreatedMember] = useState<CreateMemberResponse | null>(null);
 
-  // 認証チェック
+  // Auth check
   useEffect(() => {
     if (authLoading) return;
     if (!user) router.replace("/login");
   }, [authLoading, user, router]);
 
-  // dojoId がない場合のエラー
+  // dojoId missing
   useEffect(() => {
-    if (authLoading) return;
-    if (!user) return;
-
+    if (authLoading || !user) return;
     if (!dojoId) {
       setLoading(false);
-      setError("dojoId が取得できません。URL / params / query を確認してください。");
+      setError("Could not load dojo. Please try again from the dashboard.");
     }
   }, [authLoading, user, dojoId]);
 
   // Load members
   useEffect(() => {
     const load = async () => {
-      if (authLoading) return;
-      if (!user) return;
+      if (authLoading || !user) return;
 
       if (!dbNullable) {
-        setError("Firebase が初期化されていません");
+        setError("Firebase is not initialized.");
         setLoading(false);
         return;
       }
@@ -264,7 +260,7 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
         setMembers(activeList);
         setPendingMembers(pendingList);
       } catch (e: any) {
-        setError(e?.message || "Failed to load");
+        setError(e?.message || "Failed to load members.");
       } finally {
         setLoading(false);
       }
@@ -273,7 +269,7 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
     load();
   }, [authLoading, user, dojoId]);
 
-  // フィルター
+  // Filter
   const filtered = members.filter((m) => {
     if (
       search &&
@@ -285,14 +281,12 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
     return true;
   });
 
-  // ✅ メンバー詳細への遷移
-  // ✅ あなたの実フォルダ構成: /dojos/[dojoId]/members/[memberId]
   const goMemberDetail = (uid: string) => {
     if (!dojoId) return;
     router.push(`/dojos/${encodeURIComponent(dojoId)}/members/${encodeURIComponent(uid)}`);
   };
 
-  // 参加リクエスト承認
+  // Approve
   const approveRequest = async (member: Member) => {
     if (!dbNullable || !dojoId) return;
     setBusy(true);
@@ -318,13 +312,13 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
       setMembers((prev) => [...prev, { ...member, status: "active" }]);
       setSuccess(`Approved ${member.displayName}!`);
     } catch (e: any) {
-      setError(e?.message || "Failed to approve");
+      setError(e?.message || "Failed to approve.");
     } finally {
       setBusy(false);
     }
   };
 
-  // 参加リクエスト拒否
+  // Reject
   const rejectRequest = async (member: Member) => {
     if (!dbNullable || !dojoId) return;
     setBusy(true);
@@ -341,20 +335,20 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
       setPendingMembers((prev) => prev.filter((m) => m.uid !== member.uid));
       setSuccess(`Rejected ${member.displayName}'s request.`);
     } catch (e: any) {
-      setError(e?.message || "Failed to reject");
+      setError(e?.message || "Failed to reject.");
     } finally {
       setBusy(false);
     }
   };
 
-  // 新規メンバー追加
+  // Add member
   const addMember = async () => {
     if (!dojoId || !newMember.displayName.trim() || !newMember.email.trim()) {
-      setError("Name and email are required");
+      setError("Name and email are required.");
       return;
     }
     if (!newMember.email.includes("@")) {
-      setError("Invalid email");
+      setError("Invalid email address.");
       return;
     }
 
@@ -389,10 +383,10 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
         setCreatedMember({ ...result, temporaryPassword: password });
         setSuccess(`Member "${newMember.displayName}" created!`);
       } else {
-        throw new Error(result.error || "Failed");
+        throw new Error(result.error || "Failed to create member.");
       }
     } catch (e: any) {
-      setError(e?.message || "Failed to create member");
+      setError(e?.message || "Failed to create member.");
     } finally {
       setBusy(false);
     }
@@ -400,32 +394,22 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
 
   const closeModal = () => {
     setAddModalOpen(false);
-    setNewMember({
-      displayName: "",
-      email: "",
-      password: "",
-      roleInDojo: "student",
-    });
+    setNewMember({ displayName: "", email: "", password: "", roleInDojo: "student" });
     setCreatedMember(null);
     setError("");
   };
 
-  // 招待リンクをコピー
-// 招待リンクをコピー
-const copyInviteLink = () => {
-  if (!dojoId) {
-    setError("dojoId が無いので招待リンクを作れません");
-    return;
-  }
-  if (typeof window === "undefined") return;
+  const copyInviteLink = () => {
+    if (!dojoId) {
+      setError("Cannot create invite link.");
+      return;
+    }
+    if (typeof window === "undefined") return;
+    const link = `${window.location.origin}/signup/student-profile?dojoId=${encodeURIComponent(dojoId)}`;
+    navigator.clipboard.writeText(link);
+    setSuccess("Invite link copied to clipboard!");
+  };
 
-  // ✅ 修正: /signup/student → /signup/student-profile
-  const link = `${window.location.origin}/signup/student-profile?dojoId=${encodeURIComponent(dojoId)}`;
-  navigator.clipboard.writeText(link);
-  setSuccess("Invite link copied to clipboard!");
-};
-  // ✅ Back（あなたの構成が /dojos/[dojoId]/timetable の場合）
-  // もし timetable が query 方式ならここだけ元に戻してOK（他はそのまま使える）
   const goBack = () => {
     if (!dojoId) {
       router.push("/dojos/timetable");
@@ -434,582 +418,406 @@ const copyInviteLink = () => {
     router.push(`/dojos/${encodeURIComponent(dojoId)}/timetable`);
   };
 
+  // ============================================
+  // Loading / Auth states
+  // ============================================
+
   if (authLoading || loading) {
     return (
-      <main
-        style={{
-          padding: 24,
-          background: "#0b1b22",
-          minHeight: "100vh",
-          color: "white",
-        }}
-      >
-        Loading...
-      </main>
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <main className="max-w-6xl mx-auto px-4 py-8 pb-24">
+          <div className="flex justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+          </div>
+        </main>
+        <BottomNavigation />
+      </div>
     );
   }
 
   if (!user) return null;
 
-  // ✅ dojoId が取れない場合は “真っ白” 回避でデバッグ表示
   if (!dojoId) {
-    const paramsKeys = (() => {
-      try {
-        return Object.keys(params as any);
-      } catch {
-        return [];
-      }
-    })();
-
     return (
-      <main style={{ padding: 16, background: "#0b1b22", minHeight: "100vh", color: "white" }}>
-        <h2 style={{ marginTop: 0 }}>Missing dojoId (MembersClient)</h2>
-        <div style={{ opacity: 0.85, marginTop: 8 }}>
-          <div>props.dojoId: <b>{String(props?.dojoId || "")}</b></div>
-          <div>params keys: <b>{JSON.stringify(paramsKeys)}</b></div>
-          <div>query dojoId: <b>{String(searchParams.get("dojoId") || "")}</b></div>
-          <div>pathname dojoId: <b>{String(readDojoIdFromPathname() || "")}</b></div>
-          <div style={{ marginTop: 12 }}>href:</div>
-          <pre style={{ whiteSpace: "pre-wrap" }}>
-            {typeof window !== "undefined" ? window.location.href : "(server)"}
-          </pre>
-        </div>
-      </main>
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <main className="max-w-6xl mx-auto px-4 py-8 pb-24">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+            Could not load dojo. Please try again from the dashboard.
+          </div>
+        </main>
+        <BottomNavigation />
+      </div>
     );
   }
 
+  // ============================================
+  // Main Render
+  // ============================================
+
   return (
-    <main
-      style={{
-        padding: 24,
-        background: "#0b1b22",
-        minHeight: "100vh",
-        color: "white",
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: 12,
-          marginBottom: 24,
-        }}
-      >
-        <div>
-          <button
-            onClick={goBack}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 8,
-              background: "transparent",
-              border: "1px solid rgba(255,255,255,0.2)",
-              color: "white",
-              marginBottom: 12,
-            }}
-          >
-            ← Back
-          </button>
-          <h1 style={{ margin: 0 }}>👥 Members ({members.length})</h1>
-        </div>
+    <div className="min-h-screen bg-gray-50">
+      <Navigation />
 
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={copyInviteLink}
-            style={{
-              padding: "12px 16px",
-              borderRadius: 10,
-              background: "rgba(168, 85, 247, 0.15)",
-              border: "1px solid rgba(168, 85, 247, 0.3)",
-              color: "#a855f7",
-              fontWeight: 700,
-            }}
-          >
-            🔗 Copy Invite Link
-          </button>
-          <button
-            onClick={() => setAddModalOpen(true)}
-            style={{
-              padding: "12px 20px",
-              borderRadius: 10,
-              background: "rgba(74, 222, 128, 0.15)",
-              border: "1px solid rgba(74, 222, 128, 0.3)",
-              color: "#4ade80",
-              fontWeight: 700,
-            }}
-          >
-            ➕ Add Member
-          </button>
-        </div>
-      </div>
-
-      {/* Messages */}
-      {error && (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: 12,
-            borderRadius: 10,
-            background: "#3b1f1f",
-            color: "#ffd2d2",
-          }}
-        >
-          ❌ {error}
-        </div>
-      )}
-      {success && (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: 12,
-            borderRadius: 10,
-            background: "#1f3b2f",
-            color: "#d2ffd2",
-          }}
-        >
-          ✅ {success}
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+      <main className="max-w-6xl mx-auto px-4 py-8 pb-24">
+        {/* Back */}
         <button
-          onClick={() => setShowTab("active")}
-          style={{
-            padding: "10px 20px",
-            borderRadius: 10,
-            background: showTab === "active" ? "rgba(17, 168, 255, 0.2)" : "transparent",
-            border:
-              showTab === "active"
-                ? "1px solid rgba(17, 168, 255, 0.4)"
-                : "1px solid rgba(255,255,255,0.15)",
-            color: "white",
-            fontWeight: 700,
-          }}
+          onClick={goBack}
+          className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6"
         >
-          Active ({members.length})
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to Dojo
         </button>
-        <button
-          onClick={() => setShowTab("pending")}
-          style={{
-            padding: "10px 20px",
-            borderRadius: 10,
-            background: showTab === "pending" ? "rgba(250, 204, 21, 0.2)" : "transparent",
-            border:
-              showTab === "pending"
-                ? "1px solid rgba(250, 204, 21, 0.4)"
-                : "1px solid rgba(255,255,255,0.15)",
-            color: "white",
-            fontWeight: 700,
-            position: "relative",
-          }}
-        >
-          Pending ({pendingMembers.length})
-          {pendingMembers.length > 0 && (
-            <span
-              style={{
-                position: "absolute",
-                top: -4,
-                right: -4,
-                width: 12,
-                height: 12,
-                borderRadius: "50%",
-                background: "#facc15",
-              }}
-            />
-          )}
-        </button>
-      </div>
 
-      {/* Active Members */}
-      {showTab === "active" && (
-        <>
-          <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-            <input
-              placeholder="🔍 Search..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{
-                flex: 1,
-                minWidth: 200,
-                padding: 12,
-                borderRadius: 10,
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.15)",
-                color: "white",
-              }}
-            />
-            <select
-              value={filterRole}
-              onChange={(e) => setFilterRole(e.target.value)}
-              style={{
-                padding: 12,
-                borderRadius: 10,
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.15)",
-                color: "white",
-              }}
-            >
-              <option value="all">All Roles</option>
-              <option value="student">Students</option>
-              <option value="coach">Coaches</option>
-              <option value="staff">Staff</option>
-            </select>
+        {/* Header with dojo name */}
+        <div className="flex items-start justify-between flex-wrap gap-4 mb-8">
+          <div>
+            {dojoName && (
+              <p className="text-sm font-medium text-blue-600 mb-1">{dojoName}</p>
+            )}
+            <h1 className="text-3xl font-bold text-gray-900">Members</h1>
+            <p className="text-gray-600 mt-2">
+              {members.length} active member{members.length !== 1 && "s"}
+              {pendingMembers.length > 0 && ` · ${pendingMembers.length} pending`}
+            </p>
           </div>
 
-          {filtered.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", opacity: 0.7 }}>
-              {members.length === 0 ? "No members yet." : "No results."}
-            </div>
-          ) : (
-            <div style={{ display: "grid", gap: 12 }}>
-              {filtered.map((m) => (
-                <div
-                  key={m.uid}
-                  onClick={() => goMemberDetail(m.uid)}
-                  style={{
-                    padding: 16,
-                    borderRadius: 14,
-                    background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 16,
-                    cursor: "pointer",
-                  }}
-                  onMouseOver={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}
-                  onMouseOut={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.04)")}
-                >
-                  <div
-                    style={{
-                      width: 50,
-                      height: 50,
-                      borderRadius: "50%",
-                      background: "rgba(17, 168, 255, 0.2)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 20,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {m.displayName?.charAt(0).toUpperCase() || "?"}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700 }}>{m.displayName}</div>
-                    <div style={{ fontSize: 13, opacity: 0.7 }}>{m.email}</div>
-                  </div>
-                  <span
-                    style={{
-                      padding: "4px 10px",
-                      borderRadius: 20,
-                      background: "rgba(255,255,255,0.1)",
-                      fontSize: 12,
-                    }}
-                  >
-                    {ROLE_LABELS[m.roleInDojo] || m.roleInDojo}
-                  </span>
-                  <div
-                    style={{
-                      width: 30,
-                      height: 10,
-                      borderRadius: 2,
-                      background: BELT_COLORS[m.beltRank || "white"],
-                      border: "1px solid rgba(255,255,255,0.3)",
-                    }}
-                  />
-                  <span style={{ opacity: 0.5 }}>→</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Pending Requests */}
-      {showTab === "pending" && (
-        <div>
-          {pendingMembers.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", opacity: 0.7 }}>No pending requests.</div>
-          ) : (
-            <div style={{ display: "grid", gap: 12 }}>
-              {pendingMembers.map((m) => (
-                <div
-                  key={m.uid}
-                  style={{
-                    padding: 16,
-                    borderRadius: 14,
-                    background: "rgba(250, 204, 21, 0.05)",
-                    border: "1px solid rgba(250, 204, 21, 0.2)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 16,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 50,
-                      height: 50,
-                      borderRadius: "50%",
-                      background: "rgba(250, 204, 21, 0.2)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 20,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {m.displayName?.charAt(0).toUpperCase() || "?"}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700 }}>{m.displayName}</div>
-                    <div style={{ fontSize: 13, opacity: 0.7 }}>{m.email}</div>
-                  </div>
-                  <button
-                    onClick={() => approveRequest(m)}
-                    disabled={busy}
-                    style={{
-                      padding: "10px 16px",
-                      borderRadius: 10,
-                      background: "rgba(74, 222, 128, 0.2)",
-                      border: "1px solid rgba(74, 222, 128, 0.4)",
-                      color: "#4ade80",
-                      fontWeight: 700,
-                    }}
-                  >
-                    ✓ Approve
-                  </button>
-                  <button
-                    onClick={() => rejectRequest(m)}
-                    disabled={busy}
-                    style={{
-                      padding: "10px 16px",
-                      borderRadius: 10,
-                      background: "rgba(239, 68, 68, 0.2)",
-                      border: "1px solid rgba(239, 68, 68, 0.4)",
-                      color: "#f87171",
-                      fontWeight: 700,
-                    }}
-                  >
-                    ✗ Reject
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={copyInviteLink}
+              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-gray-700 font-medium"
+            >
+              <span className="mr-1.5">🔗</span>Copy Invite Link
+            </button>
+            <button
+              onClick={() => setAddModalOpen(true)}
+              className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition font-medium"
+            >
+              + Add Member
+            </button>
+          </div>
         </div>
-      )}
+
+        {/* Banners */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg mb-6">
+            {success}
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div className="flex gap-1 mb-6">
+          <button
+            onClick={() => setShowTab("active")}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              showTab === "active"
+                ? "bg-white text-gray-900 shadow-sm border border-gray-200"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+            }`}
+          >
+            Active ({members.length})
+          </button>
+          <button
+            onClick={() => setShowTab("pending")}
+            className={`relative px-4 py-2 rounded-lg text-sm font-medium transition ${
+              showTab === "pending"
+                ? "bg-white text-gray-900 shadow-sm border border-gray-200"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+            }`}
+          >
+            Pending ({pendingMembers.length})
+            {pendingMembers.length > 0 && (
+              <span className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full border-2 border-gray-50" />
+            )}
+          </button>
+        </div>
+
+        {/* Active Members */}
+        {showTab === "active" && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200">
+            {/* Search & Filter */}
+            <div className="px-6 py-4 border-b border-gray-200 flex gap-3 flex-wrap">
+              <div className="relative flex-1 min-w-[200px]">
+                <svg
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+                <input
+                  placeholder="Search members..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <select
+                value={filterRole}
+                onChange={(e) => setFilterRole(e.target.value)}
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">All Roles</option>
+                <option value="student">Students</option>
+                <option value="coach">Coaches</option>
+                <option value="staff">Staff</option>
+                <option value="owner">Owners</option>
+              </select>
+            </div>
+
+            {/* Member List */}
+            {filtered.length === 0 ? (
+              <div className="px-6 py-12 text-center text-gray-500">
+                {members.length === 0 ? "No members yet. Add your first member above." : "No results found."}
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {filtered.map((m) => (
+                  <div
+                    key={m.uid}
+                    onClick={() => goMemberDetail(m.uid)}
+                    className="flex items-center gap-4 px-6 py-4 hover:bg-gray-50 cursor-pointer transition"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-semibold text-sm flex-shrink-0">
+                      {m.displayName?.charAt(0).toUpperCase() || "?"}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{m.displayName}</p>
+                      {m.email && (
+                        <p className="text-sm text-gray-500 truncate">{m.email}</p>
+                      )}
+                    </div>
+
+                    <div
+                      className="w-8 h-2.5 rounded-sm border border-gray-300 flex-shrink-0"
+                      style={{ backgroundColor: BELT_COLORS[m.beltRank || "white"] }}
+                      title={`${m.beltRank || "white"} belt${m.stripes ? ` (${m.stripes} stripe${m.stripes !== 1 ? "s" : ""})` : ""}`}
+                    />
+
+                    <span
+                      className={`px-2.5 py-1 rounded-full text-xs font-medium flex-shrink-0 ${
+                        ROLE_BADGE_COLORS[m.roleInDojo] || "bg-gray-100 text-gray-700"
+                      }`}
+                    >
+                      {ROLE_LABELS[m.roleInDojo] || m.roleInDojo}
+                    </span>
+
+                    <svg
+                      className="w-5 h-5 text-gray-400 flex-shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Pending Requests */}
+        {showTab === "pending" && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200">
+            {pendingMembers.length === 0 ? (
+              <div className="px-6 py-12 text-center text-gray-500">No pending requests.</div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {pendingMembers.map((m) => (
+                  <div key={m.uid} className="flex items-center gap-4 px-6 py-4">
+                    <div className="w-10 h-10 rounded-full bg-yellow-100 text-yellow-700 flex items-center justify-center font-semibold text-sm flex-shrink-0">
+                      {m.displayName?.charAt(0).toUpperCase() || "?"}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{m.displayName}</p>
+                      {m.email && (
+                        <p className="text-sm text-gray-500 truncate">{m.email}</p>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => approveRequest(m)}
+                      disabled={busy}
+                      className="px-4 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-sm font-medium hover:bg-green-100 transition disabled:opacity-50"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => rejectRequest(m)}
+                      disabled={busy}
+                      className="px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 transition disabled:opacity-50"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+
+      <BottomNavigation />
 
       {/* Add Member Modal */}
       {addModalOpen && (
         <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
           onClick={closeModal}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.6)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-            zIndex: 50,
-          }}
         >
           <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "min(500px, 100%)",
-              borderRadius: 16,
-              background: "#0b1b22",
-              border: "1px solid rgba(255,255,255,0.14)",
-              padding: 24,
-            }}
           >
             {createdMember?.success ? (
-              <>
-                <div style={{ textAlign: "center", marginBottom: 20 }}>
-                  <div style={{ fontSize: 48 }}>✅</div>
-                  <h3 style={{ margin: "12px 0 0" }}>Member Created!</h3>
+              <div className="p-6">
+                <div className="text-center mb-6">
+                  <div className="w-14 h-14 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900">Member Created!</h3>
                 </div>
 
-                <div
-                  style={{
-                    padding: 16,
-                    borderRadius: 12,
-                    background: "rgba(74, 222, 128, 0.1)",
-                    border: "1px solid rgba(74, 222, 128, 0.3)",
-                    marginBottom: 20,
-                  }}
-                >
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 13, opacity: 0.7 }}>Name</div>
-                    <div style={{ fontWeight: 700 }}>{createdMember.displayName}</div>
-                  </div>
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 13, opacity: 0.7 }}>Email</div>
-                    <div style={{ fontWeight: 700 }}>{createdMember.email}</div>
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3 mb-6">
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">Name</p>
+                    <p className="font-medium text-gray-900">{createdMember.displayName}</p>
                   </div>
                   <div>
-                    <div style={{ fontSize: 13, opacity: 0.7 }}>Temporary Password</div>
-                    <div
-                      style={{
-                        fontWeight: 700,
-                        fontFamily: "monospace",
-                        fontSize: 18,
-                        color: "#4ade80",
-                      }}
-                    >
-                      {createdMember.temporaryPassword}
-                    </div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">Email</p>
+                    <p className="font-medium text-gray-900">{createdMember.email}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">Temporary Password</p>
+                    <p className="font-mono text-lg font-bold text-green-700">{createdMember.temporaryPassword}</p>
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    padding: 12,
-                    borderRadius: 10,
-                    background: "rgba(250, 204, 21, 0.1)",
-                    border: "1px solid rgba(250, 204, 21, 0.3)",
-                    marginBottom: 20,
-                    fontSize: 13,
-                  }}
-                >
-                  ⚠️ Save this password! Share it securely with the member.
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 mb-6">
+                  <p className="text-sm text-yellow-800">
+                    Save this password and share it securely with the member.
+                  </p>
                 </div>
 
                 <button
                   onClick={closeModal}
-                  style={{
-                    width: "100%",
-                    padding: "14px 20px",
-                    borderRadius: 10,
-                    background: "rgba(17, 168, 255, 0.2)",
-                    border: "1px solid rgba(17, 168, 255, 0.4)",
-                    color: "white",
-                    fontWeight: 700,
-                  }}
+                  className="w-full py-3 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition"
                 >
                   Done
                 </button>
-              </>
+              </div>
             ) : (
-              <>
-                <h3 style={{ margin: "0 0 20px" }}>➕ Add New Member</h3>
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold text-gray-900">Add New Member</h3>
+                  <button
+                    onClick={closeModal}
+                    className="text-gray-400 hover:text-gray-600 transition"
+                    aria-label="Close"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
 
-                <div style={{ display: "grid", gap: 16 }}>
+                {error && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm">
+                    {error}
+                  </div>
+                )}
+
+                <div className="space-y-4">
                   <div>
-                    <label style={{ fontSize: 13, opacity: 0.8 }}>Name *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Name <span className="text-red-500">*</span>
+                    </label>
                     <input
                       value={newMember.displayName}
                       onChange={(e) => setNewMember((p) => ({ ...p, displayName: e.target.value }))}
-                      style={{
-                        width: "100%",
-                        padding: 12,
-                        borderRadius: 10,
-                        marginTop: 6,
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.15)",
-                        color: "white",
-                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       placeholder="John Doe"
                     />
                   </div>
 
                   <div>
-                    <label style={{ fontSize: 13, opacity: 0.8 }}>Email *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Email <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="email"
                       value={newMember.email}
                       onChange={(e) => setNewMember((p) => ({ ...p, email: e.target.value }))}
-                      style={{
-                        width: "100%",
-                        padding: 12,
-                        borderRadius: 10,
-                        marginTop: 6,
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.15)",
-                        color: "white",
-                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       placeholder="john@example.com"
                     />
                   </div>
 
                   <div>
-                    <label style={{ fontSize: 13, opacity: 0.8 }}>Password (auto-generated if empty)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Password <span className="text-gray-400 font-normal">(auto-generated if empty)</span>
+                    </label>
                     <input
                       value={newMember.password}
                       onChange={(e) => setNewMember((p) => ({ ...p, password: e.target.value }))}
-                      style={{
-                        width: "100%",
-                        padding: 12,
-                        borderRadius: 10,
-                        marginTop: 6,
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.15)",
-                        color: "white",
-                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       placeholder="Leave empty to auto-generate"
                     />
                   </div>
 
                   <div>
-                    <label style={{ fontSize: 13, opacity: 0.8 }}>Role</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
                     <select
                       value={newMember.roleInDojo}
                       onChange={(e) => setNewMember((p) => ({ ...p, roleInDojo: e.target.value }))}
-                      style={{
-                        width: "100%",
-                        padding: 12,
-                        borderRadius: 10,
-                        marginTop: 6,
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.15)",
-                        color: "white",
-                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="student">Student</option>
                       <option value="coach">Coach</option>
                       <option value="staff">Staff</option>
                     </select>
                   </div>
-
-                  <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
-                    <button
-                      onClick={closeModal}
-                      style={{
-                        padding: "12px 18px",
-                        borderRadius: 10,
-                        background: "transparent",
-                        border: "1px solid rgba(255,255,255,0.2)",
-                        color: "white",
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={addMember}
-                      disabled={busy || !newMember.displayName.trim() || !newMember.email.trim()}
-                      style={{
-                        padding: "12px 20px",
-                        borderRadius: 10,
-                        background: "rgba(74, 222, 128, 0.2)",
-                        border: "1px solid rgba(74, 222, 128, 0.4)",
-                        color: "#4ade80",
-                        fontWeight: 700,
-                        opacity: !newMember.displayName.trim() || !newMember.email.trim() ? 0.5 : 1,
-                      }}
-                    >
-                      {busy ? "Creating..." : "Create Member"}
-                    </button>
-                  </div>
                 </div>
-              </>
+
+                <div className="flex gap-3 mt-6">
+                  <button
+                    onClick={closeModal}
+                    className="flex-1 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={addMember}
+                    disabled={busy || !newMember.displayName.trim() || !newMember.email.trim()}
+                    className="flex-1 py-2.5 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {busy ? "Creating..." : "Create Member"}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>
       )}
-    </main>
+    </div>
   );
 }

@@ -3,20 +3,22 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/providers/AuthProvider";
-import { auth, dbNullable } from "@/firebase";
+import { auth, db as dbNullable } from "@/firebase";
 import {
   doc,
   getDoc,
   setDoc,
   collection,
   getDocs,
+      writeBatch,
   deleteDoc,
+  onSnapshot,
   serverTimestamp,
   getFirestore,
 } from "firebase/firestore";
 
-// ✅ Navigation 追加
 import Navigation, { BottomNavigation } from "@/components/Navigation";
+import { useDojoName } from "@/hooks/useDojoName";
 
 import WeeklyScheduleGrid, {
   type WeeklyClassItem,
@@ -36,17 +38,20 @@ import {
 } from "@/lib/timetable-api";
 import { getOrCreateSession, toDateKey } from "@/lib/sessions";
 import { DojoLite, searchPublicDojosByPrefix } from "@/lib/searchDojos";
+import {
+  STAFF_ROLES,
+  normalizeRole,
+  resolveRole,
+  resolveDojoId,
+  resolveIsStaff,
+  type UserDocBase,
+} from "@/lib/roles";
 
-// Types
-type UserDoc = {
-  dojoId?: string | null;
+// Extended user doc type (adds fields specific to Timetable)
+type UserDoc = UserDocBase & {
   dojoName?: string | null;
   staffProfile?: { dojoId?: string | null; dojoName?: string | null; roleInDojo?: string };
   studentProfile?: { dojoId?: string | null; dojoName?: string | null; fullName?: string; belt?: string };
-  role?: string;
-  roles?: string[];
-  roleUi?: string;
-  accountType?: string;
   displayName?: string;
   email?: string;
 };
@@ -145,7 +150,7 @@ function buildPlannedSessionsForWeek(classes: TimetableClass[], weekStart: Date)
         startMinute: c.startMinute ?? 0,
         durationMinute: c.durationMinute ?? 60,
         instructor: (c as any).instructor,
-        classType: (((c as any).classType || "adult") as ClassType),
+        classType: ((c as any).classType || "adult") as ClassType,
       });
     }
   }
@@ -154,10 +159,7 @@ function buildPlannedSessionsForWeek(classes: TimetableClass[], weekStart: Date)
   );
 }
 
-// ─────────────────────────────────────────────
-// ✅ FIX: Export dependency loader (CDN UMD版)
-// ─────────────────────────────────────────────
-
+// Export dependency loader (CDN UMD)
 declare global {
   interface Window {
     html2canvas?: any;
@@ -220,9 +222,7 @@ async function getJsPDF(): Promise<any> {
   return jsPDF;
 }
 
-// ─────────────────────────────────────────────
-// ✅ FIX: lab() / lch() / oklab() / oklch() カラー対応ヘルパー
-// ─────────────────────────────────────────────
+// Color sanitizer for html2canvas
 function sanitizeColorsForHtml2Canvas(clonedDoc: Document) {
   const unsupportedColorPattern = /lab\(|lch\(|oklab\(|oklch\(/i;
   const dv = clonedDoc.defaultView || window;
@@ -240,43 +240,147 @@ function sanitizeColorsForHtml2Canvas(clonedDoc: Document) {
   });
 }
 
-// Role helpers
-const STAFF_ROLE_SET = new Set(["owner", "staff", "staff_member", "coach", "admin", "instructor"]);
-const normalizeRole = (r?: string | null) => (r ?? "").trim().toLowerCase();
-const isStaffRole = (role?: string | null) => {
-  const r = normalizeRole(role);
-  return r ? STAFF_ROLE_SET.has(r) : false;
+// Firestore helpers
+
+type TimetableSnapshot = {
+  weekday: number;
+  startMinute: number;
+  durationMinute: number;
+  title: string;
+  instructor?: string;
+  classType?: ClassType;
 };
 
-function resolveRole(ud: UserDoc | null): string | null {
-  if (!ud) return null;
-  const candidates: string[] = [];
-  if (typeof ud.role === "string" && ud.role.trim()) candidates.push(ud.role.trim());
-  if (Array.isArray(ud.roles)) for (const r of ud.roles) if (typeof r === "string" && r.trim()) candidates.push(r.trim());
-  if (typeof ud.roleUi === "string" && ud.roleUi.trim()) candidates.push(ud.roleUi.trim());
-  if (typeof ud.accountType === "string" && ud.accountType.trim()) candidates.push(ud.accountType.trim());
-  if (candidates.length === 0) return null;
-  return candidates.find((r) => isStaffRole(r)) || candidates[0];
+function normType(v: any): ClassType {
+  return v === "kids" ? "kids" : "adult";
 }
 
-const resolveDojoId = (ud: UserDoc | null) =>
-  ud ? ud.dojoId || ud.staffProfile?.dojoId || ud.studentProfile?.dojoId || null : null;
-
-function resolveIsStaff(ud: UserDoc | null): boolean {
-  if (!ud) return false;
-  const role = normalizeRole(ud.role);
-  const roleUi = normalizeRole(ud.roleUi);
-  if (role === "student" || roleUi === "student") return !!ud.staffProfile?.dojoId;
-
-  const staffDid = ud.staffProfile?.dojoId || null;
-  const studentDid = ud.studentProfile?.dojoId || null;
-  if (staffDid && !studentDid) return true;
-  if (studentDid && !staffDid) return false;
-
-  return isStaffRole(resolveRole(ud));
+function parseSessionId(sessionId: string): { dateKey?: string; timetableClassId?: string } {
+  const idx = sessionId.indexOf("__");
+  if (idx <= 0) return {};
+  const dateKey = sessionId.slice(0, idx);
+  const timetableClassId = sessionId.slice(idx + 2);
+  if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(dateKey) || !timetableClassId) return {};
+  return { dateKey, timetableClassId };
 }
 
-// Firestore helpers
+async function touchTimetableMeta(db: any, dojoId: string, by?: string) {
+  // ✅ 生徒側でも監視しやすい場所に「更新フラグ」を書く（権限により失敗してもOK）
+  const rootPatch = {
+    timetableUpdatedAt: serverTimestamp(),
+    timetableUpdatedBy: by || null,
+  };
+
+  const metaPatch = {
+    updatedAt: serverTimestamp(),
+    updatedBy: by || null,
+  };
+
+  const results = await Promise.allSettled([
+    // staff が書ける想定
+    setDoc(doc(db, "dojos", dojoId), rootPatch, { merge: true }),
+    setDoc(doc(db, "dojos", dojoId, "meta", "timetable"), metaPatch, { merge: true }),
+
+    // 生徒が read できる想定（検索にも使っている）
+    setDoc(doc(db, "publicDojos", dojoId), rootPatch, { merge: true }),
+    setDoc(doc(db, "publicDojos", dojoId, "meta", "timetable"), metaPatch, { merge: true }),
+  ]);
+
+  // すべて失敗した場合だけログ（permission-denied などはよくある）
+  if (results.every((r) => r.status === "rejected")) {
+    console.warn("Failed to touch timetable meta (all writes rejected)");
+  }
+}
+
+async function syncUpcomingSessionsForTimetableEdit(
+  db: any,
+  args: {
+    dojoId: string;
+    timetableClassId: string;
+    prev: TimetableSnapshot;
+    next: TimetableSnapshot;
+  }
+): Promise<number> {
+  const { dojoId, timetableClassId, prev, next } = args;
+
+  // ✅ 今日以降のみ（ローカルタイム 기준）
+  const todayKey = toDateKey(startOfToday(new Date()));
+
+  const snap = await getDocs(collection(db, "dojos", dojoId, "sessions"));
+
+  let batch = writeBatch(db);
+  let ops = 0;
+  let updated = 0;
+
+  const commitIfNeeded = async () => {
+    if (ops === 0) return;
+    await batch.commit();
+    batch = writeBatch(db);
+    ops = 0;
+  };
+
+  for (const d of snap.docs) {
+    const sid = d.id;
+    const data = d.data() as any;
+
+    let dateKey = String(data.dateKey || "");
+    let tcid = String(data.timetableClassId || "");
+
+    // timetableClassId / dateKey が無い古いデータでも、ID から推測する
+    if (!dateKey || !tcid) {
+      const parsed = parseSessionId(sid);
+      if (!dateKey && parsed.dateKey) dateKey = parsed.dateKey;
+      if (!tcid && parsed.timetableClassId) tcid = parsed.timetableClassId;
+    }
+
+    if (!tcid || tcid !== timetableClassId) continue;
+    if (!dateKey || dateKey < todayKey) continue;
+
+    // 手動上書きが明示されているものは触らない
+    if (data.manualOverride === true) continue;
+
+    // ✅ まず「時間のフィールドだけ」同期できるか判定
+    const timeOk =
+      (data.weekday == null || Number(data.weekday) === Number(prev.weekday)) &&
+      (data.startMinute == null || Number(data.startMinute) === Number(prev.startMinute)) &&
+      (data.durationMinute == null || Number(data.durationMinute) === Number(prev.durationMinute));
+
+    if (!timeOk) continue;
+
+    // ✅ タイトル/インストラクター/種別は、古い値と一致している時だけ更新（個別カスタムを壊さない）
+    const titleOk = data.title == null || String(data.title) === String(prev.title);
+    const instructorOk =
+      data.instructor == null || String(data.instructor || "") === String(prev.instructor || "");
+    const classTypeOk = data.classType == null || normType(data.classType) === normType(prev.classType || "adult");
+
+    const patch: any = {
+      updatedAt: serverTimestamp(),
+      syncedFromTimetableAt: serverTimestamp(),
+      weekday: next.weekday,
+      startMinute: next.startMinute,
+      durationMinute: next.durationMinute,
+    };
+
+    if (titleOk) patch.title = next.title;
+    if (instructorOk) patch.instructor = next.instructor || null;
+    if (classTypeOk) patch.classType = next.classType || "adult";
+
+    // 後方互換: 欠けてる場合は補完しておく
+    if (data.timetableClassId == null) patch.timetableClassId = timetableClassId;
+    if (data.dateKey == null && dateKey) patch.dateKey = dateKey;
+
+    batch.set(d.ref, patch, { merge: true });
+    ops += 1;
+    updated += 1;
+
+    // Firestore batch は 500 操作まで
+    if (ops >= 450) await commitIfNeeded();
+  }
+
+  await commitIfNeeded();
+  return updated;
+}
+
 async function ensureMemberRegistration(
   db: any,
   p: { dojoId: string; userId: string; displayName?: string; email?: string; roleInDojo?: string; beltRank?: string }
@@ -313,7 +417,7 @@ async function loadInstructors(db: any, dojoId: string) {
     for (const d of snap.docs) {
       const data = d.data();
       const role = normalizeRole(data.roleInDojo || data.role);
-      if (STAFF_ROLE_SET.has(role)) {
+      if (STAFF_ROLES.has(role)) {
         instructors.push({
           uid: d.id,
           displayName: data.displayName || data.name || data.email || d.id,
@@ -327,22 +431,14 @@ async function loadInstructors(db: any, dojoId: string) {
   return instructors;
 }
 
-/**
- * ✅ ここだけ置換（互換対応版）
- * - weekday: weekday があればそれ、なければ dayOfWeek、なければ 0
- * - startMinute: startMinute があればそれ、なければ startTime("HH:MM") を変換
- * - durationMinute: durationMinute があればそれ、なければ startTime/endTime から計算（最低30分）
- */
 async function listTimetableFromFirestore(db: any, dojoId: string) {
   try {
     const snap = await getDocs(collection(db, "dojos", dojoId, "timetableClasses"));
     return snap.docs.map((d) => {
       const data = d.data() as any;
 
-      // weekday: use weekday if exists, otherwise use dayOfWeek
       const weekday = (data.weekday ?? data.dayOfWeek ?? 0) as number;
 
-      // startMinute: use startMinute if exists, otherwise convert from startTime
       let startMinute = (data.startMinute ?? 0) as number;
       if (data.startMinute == null && typeof data.startTime === "string" && data.startTime) {
         const match = data.startTime.match(/^(\d{1,2}):(\d{2})$/);
@@ -351,7 +447,6 @@ async function listTimetableFromFirestore(db: any, dojoId: string) {
         }
       }
 
-      // durationMinute: use durationMinute if exists, otherwise calculate from startTime/endTime
       let durationMinute = (data.durationMinute ?? 60) as number;
       if (
         data.durationMinute == null &&
@@ -384,52 +479,35 @@ async function listTimetableFromFirestore(db: any, dojoId: string) {
   }
 }
 
-async function loadTimetableClassesUnified(dojoId: string, db: any, setDebug?: (s: (p: string) => string) => void) {
-  let apiRows: TimetableClass[] = [];
-  let fsRows: TimetableClass[] = [];
+async function loadTimetableClassesUnified(dojoId: string, db: any) {
   try {
-    apiRows = await listTimetable(dojoId);
-    setDebug?.((p) => p + ` | API: ${apiRows.length}`);
-  } catch (e: any) {
-    setDebug?.((p) => p + ` | API err: ${e?.message}`);
+    // ✅ 空配列でも「正常結果」として採用（0件はあり得る）
+    const apiRows = await listTimetable(dojoId);
+    return apiRows;
+  } catch {
+    // ✅ API が落ちた/エラーのときだけ Firestore fallback
+    if (db) {
+      try {
+        return await listTimetableFromFirestore(db, dojoId);
+      } catch {}
+    }
+    return [];
   }
-  if (apiRows.length === 0 && db)
-    try {
-      fsRows = await listTimetableFromFirestore(db, dojoId);
-      setDebug?.((p) => p + ` | FS: ${fsRows.length}`);
-    } catch {}
-  return apiRows.length > 0 ? apiRows : fsRows;
 }
 
-async function loadSessionsFromFirestore(
-  db: any,
-  dojoId: string,
-  startDK: string,
-  endDK: string,
-  setDebug?: (s: (p: string) => string) => void
-) {
+async function loadSessionsFromFirestore(db: any, dojoId: string, startDK: string, endDK: string) {
   const m = new Map<string, any>();
   try {
     const snap = await getDocs(collection(db, "dojos", dojoId, "sessions"));
-    setDebug?.((p) => p + ` | Raw: ${snap.docs.length}`);
     for (const d of snap.docs) {
       const data = d.data();
       if (data.dateKey && data.dateKey >= startDK && data.dateKey <= endDK) m.set(d.id, { id: d.id, ...data });
     }
-    setDebug?.((p) => p + ` | Filtered: ${m.size}`);
-  } catch (e: any) {
-    setDebug?.((p) => p + ` | Sess err: ${e?.message}`);
-  }
+  } catch {}
   return m;
 }
 
-async function loadMyReservations(
-  db: any,
-  dojoId: string,
-  userId: string,
-  sessionIds: string[],
-  setDebug?: (s: (p: string) => string) => void
-) {
+async function loadMyReservations(db: any, dojoId: string, userId: string, sessionIds: string[]) {
   const m = new Map<string, Reservation>();
   const results = await Promise.all(
     sessionIds.map(async (sid) => {
@@ -455,7 +533,6 @@ async function loadMyReservations(
     })
   );
   for (const r of results) if (r) m.set(r.sessionId, r.reservation);
-  setDebug?.((p) => p + ` | Reserv: ${m.size}`);
   return m;
 }
 
@@ -613,7 +690,9 @@ const InstructorSelect = ({
 
   const [mode, setMode] = useState<"select" | "manual">(() => {
     if (!value) return "select";
-    return instructors.find((i) => i.displayName === value) || instructors.find((i) => i.uid === value) ? "select" : "manual";
+    return instructors.find((i) => i.displayName === value) || instructors.find((i) => i.uid === value)
+      ? "select"
+      : "manual";
   });
 
   useEffect(() => {
@@ -624,34 +703,6 @@ const InstructorSelect = ({
     )
       setMode("select");
   }, [instructors, value]);
-
-  const EXPORT_ROOT_ATTR = "data-export-root";
-
-  function sanitizeCloneForExport(clonedDoc: Document) {
-    // 既存のカラー対策
-    sanitizeColorsForHtml2Canvas(clonedDoc);
-
-    // エクスポート対象のルート要素（元DOMで一時的に付けた属性を頼りに探す）
-    const root = clonedDoc.querySelector(`[${EXPORT_ROOT_ATTR}="1"]`) as HTMLElement | null;
-    if (!root) return;
-
-    // 文字切れの原因になりやすい clip/ellipsis 系をクローン側だけ無効化
-    const nodes = root.querySelectorAll<HTMLElement>("*");
-    nodes.forEach((n) => {
-      const cls = n.className || "";
-
-      // Tailwind: overflow-hidden / truncate / line-clamp-* があると切れやすい
-      if (typeof cls === "string" && (cls.includes("overflow-hidden") || cls.includes("truncate") || cls.includes("line-clamp"))) {
-        n.style.overflow = "visible";
-        n.style.textOverflow = "clip";
-        n.style.whiteSpace = "normal";
-        // line-clamp の display:-webkit-box を殺す（安全側で block に）
-        n.style.display = "block";
-        (n.style as any).webkitLineClamp = "unset";
-        (n.style as any).webkitBoxOrient = "unset";
-      }
-    });
-  }
 
   return (
     <div className="space-y-2">
@@ -697,7 +748,9 @@ const InstructorSelect = ({
   );
 };
 
+// ─────────────────────────────────────────────
 // Main Component
+// ─────────────────────────────────────────────
 export default function TimetableClient() {
   const router = useRouter();
   const { user, loading } = useAuth();
@@ -708,6 +761,8 @@ export default function TimetableClient() {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>("");
 
+  const { dojoName } = useDojoName(dojoId ?? "");
+
   const [weekStart, setWeekStart] = useState(() => startOfToday(new Date()));
   const [classes, setClasses] = useState<TimetableClass[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -717,7 +772,6 @@ export default function TimetableClient() {
   const [dataLoading, setDataLoading] = useState(true);
   const [err, setErr] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
-  const [debugInfo, setDebugInfo] = useState<string>("");
   const [memberRegistered, setMemberRegistered] = useState(false);
 
   const [dojoSearchTerm, setDojoSearchTerm] = useState("");
@@ -778,9 +832,7 @@ export default function TimetableClient() {
     return byUid ? byUid.displayName : iv;
   };
 
-  // ─────────────────────────────────────────────
-  // ✅ FIX: Export PNG (lab()カラー対応)
-  // ─────────────────────────────────────────────
+  // Export PNG
   const exportToPng = useCallback(async () => {
     const el = gridRef.current?.getGridElement();
     if (!el) {
@@ -825,9 +877,7 @@ export default function TimetableClient() {
     }
   }, [weekStart]);
 
-  // ─────────────────────────────────────────────
-  // ✅ FIX: Export PDF (lab()カラー対応)
-  // ─────────────────────────────────────────────
+  // Export PDF
   const exportToPdf = useCallback(async () => {
     const el = gridRef.current?.getGridElement();
     if (!el) {
@@ -915,8 +965,6 @@ export default function TimetableClient() {
         setUserRole(resolveRole(ud));
         setUserName(ud?.displayName || ud?.studentProfile?.fullName || ud?.email || "");
 
-        setDebugInfo(`role=${ud?.role}, dojoId=${did}, isStaff=${resolveIsStaff(ud)}`);
-
         if (did && !resolveIsStaff(ud) && !cancelled) {
           const registered = await ensureMemberRegistration(db, {
             dojoId: did,
@@ -926,10 +974,7 @@ export default function TimetableClient() {
             roleInDojo: "student",
             beltRank: ud?.studentProfile?.belt || "white",
           });
-          if (registered) {
-            setMemberRegistered(true);
-            setDebugInfo((p) => p + " | Auto-reg");
-          }
+          if (registered) setMemberRegistered(true);
         }
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || "Failed to load profile.");
@@ -1009,7 +1054,7 @@ export default function TimetableClient() {
       setDojoSearchTerm("");
       setSuccessMsg(`Selected gym: ${dojo.name}`);
     } catch (e: any) {
-      setErr(e?.message || "Failed to select dojo");
+      setErr(e?.message || "Failed to select dojo.");
     } finally {
       setBusy(false);
     }
@@ -1021,20 +1066,13 @@ export default function TimetableClient() {
       if (!dojoId) return;
       setBusy(true);
       setErr("");
-      setDebugInfo((p) => p + " | Loading classes...");
       try {
         const db = await waitForDb();
         if (!db || cancelled) return;
-        const rows = await loadTimetableClassesUnified(dojoId, db, setDebugInfo);
-        if (!cancelled) {
-          setClasses(rows);
-          setDebugInfo((p) => p + ` | Final: ${rows.length}`);
-        }
+        const rows = await loadTimetableClassesUnified(dojoId, db);
+        if (!cancelled) setClasses(rows);
       } catch (e: any) {
-        if (!cancelled) {
-          setErr(e?.message || "Failed to load timetable.");
-          setDebugInfo((p) => p + ` | Error: ${e?.message}`);
-        }
+        if (!cancelled) setErr(e?.message || "Failed to load timetable.");
       } finally {
         if (!cancelled) setBusy(false);
       }
@@ -1043,6 +1081,91 @@ export default function TimetableClient() {
       cancelled = true;
     };
   }, [dojoId, isStaff]);
+
+  const refresh = useCallback(async () => {
+    if (!dojoId) return;
+    const db = await waitForDb();
+    if (db) setClasses(await loadTimetableClassesUnified(dojoId, db));
+  }, [dojoId]);
+
+
+// ✅ Timetable 更新シグナルを監視して、生徒側にも即反映
+  useEffect(() => {
+    if (!dojoId) return;
+
+    let cancelled = false;
+    const unsubs: Array<() => void> = [];
+    let timer: any = null;
+
+    const requestRefresh = () => {
+      if (timer) return;
+      timer = setTimeout(async () => {
+        timer = null;
+        try {
+          await refresh();
+        } catch (e) {
+          console.warn("timetable refresh failed:", e);
+        }
+      }, 150);
+    };
+
+    (async () => {
+      const db = await waitForDb();
+      if (!db || cancelled) return;
+
+      // ✅ 生徒が read できる可能性が高い publicDojos を監視（最優先）
+      const pubRef = doc(db, "publicDojos", dojoId);
+      unsubs.push(
+        onSnapshot(
+          pubRef,
+          () => requestRefresh(),
+          (err) => console.warn("public dojo snapshot error:", err)
+        )
+      );
+
+      // ✅ meta がある場合はそれも（permission-denied は無視でOK）
+      const pubMetaRef = doc(db, "publicDojos", dojoId, "meta", "timetable");
+      unsubs.push(
+        onSnapshot(
+          pubMetaRef,
+          () => requestRefresh(),
+          (err) => console.warn("public timetable meta snapshot error:", err)
+        )
+      );
+
+      // ✅ 既存: dojos 側（読めるユーザーだけでOK）
+      const dojoRef = doc(db, "dojos", dojoId);
+      unsubs.push(
+        onSnapshot(
+          dojoRef,
+          () => requestRefresh(),
+          (err) => console.warn("dojo doc snapshot error:", err)
+        )
+      );
+
+      const metaRef = doc(db, "dojos", dojoId, "meta", "timetable");
+      unsubs.push(
+        onSnapshot(
+          metaRef,
+          () => requestRefresh(),
+          (err) => console.warn("timetable meta snapshot error:", err)
+        )
+      );
+
+      // 初回も一度リフレッシュ（snapshot 前に UI を合わせる）
+      requestRefresh();
+    })();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      for (const u of unsubs) {
+        try {
+          u();
+        } catch {}
+      }
+    };
+  }, [dojoId, refresh]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1053,7 +1176,6 @@ export default function TimetableClient() {
         return;
       }
       setDataLoading(true);
-      setDebugInfo((p) => p + " | Loading student sessions...");
       try {
         const db = await waitForDb();
         if (!db || cancelled) return;
@@ -1063,39 +1185,56 @@ export default function TimetableClient() {
         const endDK = toDateKey(weekEnd);
 
         const planned = buildPlannedSessionsForWeek(classes, weekStart);
-        setDebugInfo((p) => p + ` | Planned: ${planned.length}`);
-
         const merged = new Map<string, Session>();
         for (const s of planned) merged.set(s.id, s);
 
-        const dbSessions = await loadSessionsFromFirestore(db, dojoId, startDK, endDK, setDebugInfo);
+        // ✅ 現在の timetable(template) に存在する classId だけ有効
+        const activeClassIds = new Set(classes.map((c) => c.id));
+
+        const dbSessions = await loadSessionsFromFirestore(db, dojoId, startDK, endDK);
         for (const [sid, data] of dbSessions) {
+          // ✅ timetable で削除されたテンプレに紐づく session は生徒 UI から除外
+          const parsed = parseSessionId(sid);
+          const tcid = String((data as any).timetableClassId || parsed.timetableClassId || "");
+          if (tcid && !activeClassIds.has(tcid)) continue;
+
           const prev = merged.get(sid);
+
+          // ✅ Timetable の変更を生徒側に反映させるため、
+          // manualOverride が true の session だけが timetable を上書きする。
+          // （prev が無い＝ad-hoc session の場合は session を採用）
+          const useSession = (data as any).manualOverride === true || !prev;
+
           merged.set(sid, {
             id: sid,
-            timetableClassId: data.timetableClassId || prev?.timetableClassId || "",
-            title: data.title || prev?.title || "Class",
-            dateKey: data.dateKey || prev?.dateKey || "",
-            weekday: data.weekday ?? prev?.weekday ?? 0,
-            startMinute: data.startMinute ?? prev?.startMinute ?? 0,
-            durationMinute: data.durationMinute ?? prev?.durationMinute ?? 60,
-            instructor: data.instructor || prev?.instructor,
-            classType: (data.classType || prev?.classType || "adult") as ClassType,
+            timetableClassId: tcid || prev?.timetableClassId || "",
+            title: useSession
+              ? (data as any).title || prev?.title || "Class"
+              : prev?.title || (data as any).title || "Class",
+            dateKey: (data as any).dateKey || parsed.dateKey || prev?.dateKey || "",
+            weekday: useSession ? (data as any).weekday ?? prev?.weekday ?? 0 : prev?.weekday ?? (data as any).weekday ?? 0,
+            startMinute: useSession
+              ? (data as any).startMinute ?? prev?.startMinute ?? 0
+              : prev?.startMinute ?? (data as any).startMinute ?? 0,
+            durationMinute: useSession
+              ? (data as any).durationMinute ?? prev?.durationMinute ?? 60
+              : prev?.durationMinute ?? (data as any).durationMinute ?? 60,
+            instructor: useSession ? (data as any).instructor || prev?.instructor : prev?.instructor || (data as any).instructor,
+            classType: (useSession
+              ? (data as any).classType || prev?.classType || "adult"
+              : prev?.classType || (data as any).classType || "adult") as ClassType,
           });
-        }
+}
 
         const sessionList = Array.from(merged.values())
           .filter((s) => s.dateKey && s.dateKey >= startDK && s.dateKey <= endDK)
           .sort((a, b) => (a.dateKey !== b.dateKey ? a.dateKey.localeCompare(b.dateKey) : a.startMinute - b.startMinute));
 
-        setDebugInfo((p) => p + ` | Final: ${sessionList.length}`);
-
         const reservationsMap = await loadMyReservations(
           db,
           dojoId,
           user.uid,
-          sessionList.map((s) => s.id),
-          setDebugInfo
+          sessionList.map((s) => s.id)
         );
 
         if (!cancelled) {
@@ -1103,10 +1242,7 @@ export default function TimetableClient() {
           setMyReservations(reservationsMap);
         }
       } catch (e: any) {
-        if (!cancelled) {
-          setErr(e?.message || "Failed to load sessions.");
-          setDebugInfo((p) => p + ` | Load error: ${e?.message}`);
-        }
+        if (!cancelled) setErr(e?.message || "Failed to load sessions.");
       } finally {
         if (!cancelled) setDataLoading(false);
       }
@@ -1132,7 +1268,7 @@ export default function TimetableClient() {
         durationMinute: c.durationMinute,
         status: "available" as const,
         instructor: (c as any).instructor,
-        classType: (((c as any).classType || "adult") as ClassType),
+        classType: ((c as any).classType || "adult") as ClassType,
       }));
 
     return sessions.map((s) => {
@@ -1147,7 +1283,7 @@ export default function TimetableClient() {
         dateKey: s.dateKey,
         status: past ? ("past" as const) : reserved ? ("reserved" as const) : ("available" as const),
         instructor: s.instructor,
-        classType: ((s.classType || "adult") as ClassType),
+        classType: (s.classType || "adult") as ClassType,
       };
     });
   }, [isStaff, classes, sessions, myReservations]);
@@ -1156,12 +1292,6 @@ export default function TimetableClient() {
     () => dojoId && title.trim() && /^\d{1,2}:\d{2}$/.test(startHHMM.trim()) && durationMin >= 15,
     [dojoId, title, startHHMM, durationMin]
   );
-
-  const refresh = async () => {
-    if (!dojoId) return;
-    const db = await waitForDb();
-    if (db) setClasses(await loadTimetableClassesUnified(dojoId, db));
-  };
 
   const onCreate = async () => {
     if (!dojoId || !canCreate) return;
@@ -1176,6 +1306,10 @@ export default function TimetableClient() {
         instructor: instructor || undefined,
         classType,
       } as any);
+
+      const db = await waitForDb();
+      if (db) await touchTimetableMeta(db, dojoId, user?.uid);
+
       await refresh();
       setSuccessMsg("Class created!");
     } catch (e: any) {
@@ -1200,6 +1334,10 @@ export default function TimetableClient() {
       setDeleteConfirmOpen(false);
       setDeletingClass(null);
       setSuccessMsg(`Deleted: ${deletingClass.title}`);
+
+      const db = await waitForDb();
+      if (db) await touchTimetableMeta(db, dojoId, user?.uid);
+
       await refresh();
     } catch (e: any) {
       setErr(e?.message || "Delete failed.");
@@ -1215,7 +1353,7 @@ export default function TimetableClient() {
     setEditStartHHMM(minutesToHHMM(k.startMinute));
     setEditDurationMin(k.durationMinute);
     setEditInstructor(resolveInstructorName((k as any).instructor || ""));
-    setEditClassType((((k as any).classType || "adult") as ClassType));
+    setEditClassType(((k as any).classType || "adult") as ClassType);
     setEditModalOpen(true);
   };
 
@@ -1229,6 +1367,25 @@ export default function TimetableClient() {
     setBusy(true);
     setErr("");
     setSuccessMsg("");
+
+    const prevSnapshot: TimetableSnapshot = {
+      title: editingClass.title,
+      weekday: editingClass.weekday,
+      startMinute: editingClass.startMinute,
+      durationMinute: editingClass.durationMinute,
+      instructor: (editingClass as any).instructor || "",
+      classType: (editingClass as any).classType || "adult",
+    };
+
+    const nextSnapshot: TimetableSnapshot = {
+      title: t,
+      weekday: editWeekday,
+      startMinute: hhmmToMinutes(editStartHHMM),
+      durationMinute: editDurationMin,
+      instructor: editInstructor || "",
+      classType: editClassType || "adult",
+    };
+
     try {
       await updateTimetableClass(dojoId, editingClass.id, {
         title: t,
@@ -1240,7 +1397,27 @@ export default function TimetableClient() {
       } as any);
       setEditModalOpen(false);
       setEditingClass(null);
-      setSuccessMsg(`Updated: ${t}`);
+
+      const db = await waitForDb();
+      if (db) {
+        const synced = await syncUpcomingSessionsForTimetableEdit(db, {
+          dojoId,
+          timetableClassId: editingClass.id,
+          prev: prevSnapshot,
+          next: nextSnapshot,
+        });
+
+        await touchTimetableMeta(db, dojoId, user?.uid);
+
+        if (synced > 0) {
+          setSuccessMsg(`Updated: ${t} (synced ${synced} sessions)`);
+        } else {
+          setSuccessMsg(`Updated: ${t}`);
+        }
+      } else {
+        setSuccessMsg(`Updated: ${t}`);
+      }
+
       await refresh();
     } catch (e: any) {
       setErr(e?.message || "Update failed.");
@@ -1331,6 +1508,9 @@ export default function TimetableClient() {
 
       setModalOpen(false);
       setSuccessMsg(`Created class + ${repeatWeeks} session(s): ${created.join(", ")}`);
+
+      await touchTimetableMeta(db, dojoId, user?.uid);
+
       await refresh();
     } catch (e: any) {
       setErr(e?.message || "Create failed.");
@@ -1397,7 +1577,7 @@ export default function TimetableClient() {
       setSelectedSession(null);
       setSuccessMsg(`Reserved: ${selectedSession.title} (${selectedDateKey || selectedSession.dateKey})`);
     } catch (e: any) {
-      setErr(e?.code === "permission-denied" ? "Permission denied." : e?.message || "Failed to reserve");
+      setErr((e as any)?.code === "permission-denied" ? "Permission denied." : (e as any)?.message || "Failed to reserve.");
     } finally {
       setBusy(false);
     }
@@ -1416,16 +1596,18 @@ export default function TimetableClient() {
         m.delete(sessionId);
         return m;
       });
-      setSuccessMsg("Reservation cancelled");
+      setSuccessMsg("Reservation cancelled.");
     } catch (e: any) {
-      setErr(e?.code === "permission-denied" ? "Permission denied." : e?.message || "Failed to cancel");
+      setErr(e?.code === "permission-denied" ? "Permission denied." : e?.message || "Failed to cancel.");
     } finally {
       setBusy(false);
     }
   };
 
+  // ─────────────────────────────────────────────
   // Render
-  // ✅ ローディング画面は Navigation を付けない（セオリー通り）
+  // ─────────────────────────────────────────────
+
   if (loading || profileLoading)
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
@@ -1439,12 +1621,10 @@ export default function TimetableClient() {
       </div>
     );
 
-  // ✅ Redirecting には Navigation + BottomNavigation を追加
   if (!user)
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
         <Navigation dojoId={dojoId} isStaff={isStaff} userName={userName} userEmail={user?.email || undefined} />
-
         <div className="mx-auto max-w-5xl p-4 sm:p-6 pb-20 md:pb-6">
           <Card>
             <div className="px-5 py-5 sm:px-6 sm:py-6">
@@ -1452,31 +1632,24 @@ export default function TimetableClient() {
             </div>
           </Card>
         </div>
-
         <BottomNavigation dojoId={dojoId} isStaff={isStaff} />
       </div>
     );
 
-  // ✅ dojoId がない場合：Navigation に含まれるボタンは削除（Sign Out / Back to Home）
   if (!dojoId)
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
         <Navigation dojoId={dojoId} isStaff={isStaff} userName={userName} userEmail={user?.email || undefined} />
-
         <div className="mx-auto max-w-3xl p-4 sm:p-6 space-y-4 pb-20 md:pb-6">
           <Card>
             <div className="px-5 py-4 sm:px-6 sm:py-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">Timetable</h1>
-                  <p className="mt-1 text-sm text-slate-500">Select a gym to view the schedule.</p>
-                </div>
-              </div>
+              <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">Timetable</h1>
+              <p className="mt-1 text-sm text-slate-500">Select a gym to view the schedule.</p>
             </div>
           </Card>
 
-          {err && <Alert kind="error">❌ {err}</Alert>}
-          {successMsg && <Alert kind="success">✅ {successMsg}</Alert>}
+          {err && <Alert kind="error">{err}</Alert>}
+          {successMsg && <Alert kind="success">{successMsg}</Alert>}
 
           <Card>
             <div className="px-5 py-5 sm:px-6 sm:py-6 space-y-4">
@@ -1517,7 +1690,6 @@ export default function TimetableClient() {
             </div>
           </Card>
         </div>
-
         <BottomNavigation dojoId={dojoId} isStaff={isStaff} />
       </div>
     );
@@ -1532,7 +1704,6 @@ export default function TimetableClient() {
     </span>
   );
 
-  // ✅ メイン return：Navigation + BottomNavigation 追加、Header 内の Members/Profile/SignOut を削除
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
       <Navigation dojoId={dojoId} isStaff={isStaff} userName={userName} userEmail={user?.email || undefined} />
@@ -1543,14 +1714,10 @@ export default function TimetableClient() {
           <div className="px-5 py-4 sm:px-6 sm:py-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">
-                  Timetable <span className="text-slate-500 font-medium">({isStaff ? "Staff" : "Student"})</span>
-                </h1>
+                {dojoName && <p className="text-sm font-medium text-blue-600 mb-1">{dojoName}</p>}
+                <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">Timetable</h1>
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-600">
                   {viewPill}
-                  <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-700">
-                    dojoId: {dojoId}
-                  </span>
                   {!isStaff && userName && (
                     <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-700">
                       {userName}
@@ -1568,20 +1735,9 @@ export default function TimetableClient() {
           </div>
         </Card>
 
-        {memberRegistered && <Alert kind="success">✅ Automatically registered as a member</Alert>}
-        {err && <Alert kind="error">❌ {err}</Alert>}
-        {successMsg && <Alert kind="success">✅ {successMsg}</Alert>}
-
-        {debugInfo && (
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600 shadow-sm">
-            <div className="font-mono break-all opacity-80">
-              🔍 Debug: {debugInfo}
-              <br />
-              Classes: {classes.length} | Sessions: {sessions.length} | dojoId: {dojoId} | role: {userRole ?? "(null)"} | isStaff:{" "}
-              {String(isStaff)} | Instructors: {instructors.length}
-            </div>
-          </div>
-        )}
+        {memberRegistered && <Alert kind="success">Automatically registered as a member.</Alert>}
+        {err && <Alert kind="error">{err}</Alert>}
+        {successMsg && <Alert kind="success">{successMsg}</Alert>}
 
         {/* Filter + Export */}
         <Card>
@@ -1626,7 +1782,7 @@ export default function TimetableClient() {
             <div className="px-5 py-5 sm:px-6 sm:py-6 space-y-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-base font-semibold text-slate-900">Add class (quick)</div>
+                  <div className="text-base font-semibold text-slate-900">Add Class (Quick)</div>
                   <div className="mt-1 text-sm text-slate-500">
                     Tip: Click an empty slot on the grid to create a class and pre-create sessions.
                   </div>
@@ -1782,7 +1938,7 @@ export default function TimetableClient() {
 
               <div className="grid gap-2">
                 {classes.map((c) => {
-                  const typeConfig = CLASS_TYPE_CONFIG[(((c as any).classType || "adult") as ClassType)];
+                  const typeConfig = CLASS_TYPE_CONFIG[((c as any).classType || "adult") as ClassType];
                   return (
                     <div
                       key={c.id}
@@ -1831,7 +1987,7 @@ export default function TimetableClient() {
           </Card>
         )}
 
-        {/* Modals（以下、元のまま） */}
+        {/* Create Modal */}
         {isStaff && modalOpen && (
           <div onClick={() => setModalOpen(false)} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white shadow-xl">
@@ -1935,14 +2091,15 @@ export default function TimetableClient() {
           </div>
         )}
 
+        {/* Edit Modal */}
         {isStaff && editModalOpen && editingClass && (
           <div onClick={() => setEditModalOpen(false)} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white shadow-xl">
               <div className="px-5 py-4 sm:px-6 sm:py-5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-lg font-semibold text-slate-900">✏️ Edit Class</div>
-                    <div className="mt-1 text-sm text-slate-500">Update title/time/duration/instructor/type</div>
+                    <div className="text-lg font-semibold text-slate-900">Edit Class</div>
+                    <div className="mt-1 text-sm text-slate-500">Update title, time, duration, instructor, or type</div>
                   </div>
                   <OutlineBtn onClick={() => setEditModalOpen(false)}>✕</OutlineBtn>
                 </div>
@@ -2016,16 +2173,17 @@ export default function TimetableClient() {
           </div>
         )}
 
+        {/* Delete Confirm Modal */}
         {isStaff && deleteConfirmOpen && deletingClass && (
           <div onClick={() => setDeleteConfirmOpen(false)} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-3xl border border-rose-200 bg-white shadow-xl">
               <div className="px-5 py-4 sm:px-6 sm:py-5">
-                <div className="text-lg font-semibold text-rose-700">🗑️ Delete Class?</div>
+                <div className="text-lg font-semibold text-rose-700">Delete Class?</div>
                 <div className="mt-3 text-sm text-slate-700">
                   Are you sure you want to delete <span className="font-semibold">"{deletingClass.title}"</span>?
                 </div>
                 <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-                  ⚠️ This will only delete the timetable template. Existing sessions will remain.
+                  This will only delete the timetable template. Existing sessions will remain.
                 </div>
                 <div className="mt-5 flex justify-end gap-2">
                   <OutlineBtn onClick={() => setDeleteConfirmOpen(false)}>Cancel</OutlineBtn>
@@ -2043,6 +2201,7 @@ export default function TimetableClient() {
           </div>
         )}
 
+        {/* Reserve Modal (Student) */}
         {!isStaff && reserveModalOpen && selectedSession && (
           <div onClick={() => setReserveModalOpen(false)} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-3xl border border-slate-200 bg-white shadow-xl">
@@ -2055,8 +2214,8 @@ export default function TimetableClient() {
                     <>
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-lg font-semibold text-slate-900">{reserved ? "✅ Reservation" : "📅 Reserve Class"}</div>
-                          <div className="mt-1 text-sm text-slate-500">Confirm / cancel your reservation</div>
+                          <div className="text-lg font-semibold text-slate-900">{reserved ? "Reservation" : "Reserve Class"}</div>
+                          <div className="mt-1 text-sm text-slate-500">Confirm or cancel your reservation</div>
                         </div>
                         <OutlineBtn onClick={() => setReserveModalOpen(false)}>✕</OutlineBtn>
                       </div>

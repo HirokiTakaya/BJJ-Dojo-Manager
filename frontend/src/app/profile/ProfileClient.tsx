@@ -3,18 +3,15 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/providers/AuthProvider";
-import { auth, dbNullable } from "@/firebase";
-import {
-  doc,
-  getDoc,
-  setDoc,
-  serverTimestamp,
-  getFirestore,
-} from "firebase/firestore";
+import { auth, db } from "@/firebase";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { useDojoName } from "@/hooks/useDojoName";
+import { resolveIsStaff, type UserDocBase } from "@/lib/roles";
+import Navigation, { BottomNavigation } from "@/components/Navigation";
 
-// ============================================
+// ─────────────────────────────────────────────
 // Types
-// ============================================
+// ─────────────────────────────────────────────
 
 type UserProfile = {
   displayName?: string;
@@ -22,17 +19,8 @@ type UserProfile = {
   dojoId?: string;
   dojoName?: string;
   role?: string;
-  staffProfile?: {
-    dojoId?: string;
-    dojoName?: string;
-    roleInDojo?: string;
-  };
-  studentProfile?: {
-    dojoId?: string;
-    dojoName?: string;
-    fullName?: string;
-    belt?: string;
-  };
+  staffProfile?: { dojoId?: string; dojoName?: string; roleInDojo?: string };
+  studentProfile?: { dojoId?: string; dojoName?: string; fullName?: string; belt?: string };
 };
 
 type MemberProfile = {
@@ -46,20 +34,20 @@ type MemberProfile = {
   notes?: string;
 };
 
-// ============================================
-// Constants
-// ============================================
+// ─────────────────────────────────────────────
+// Belt Config
+// ─────────────────────────────────────────────
 
 const ADULT_BELTS = [
-  { value: "white", label: "White", color: "#FFFFFF" },
-  { value: "blue", label: "Blue", color: "#0066CC" },
-  { value: "purple", label: "Purple", color: "#6B3FA0" },
-  { value: "brown", label: "Brown", color: "#8B4513" },
-  { value: "black", label: "Black", color: "#1A1A1A" },
+  { value: "white", label: "White", color: "#E5E7EB" },
+  { value: "blue", label: "Blue", color: "#2563EB" },
+  { value: "purple", label: "Purple", color: "#7C3AED" },
+  { value: "brown", label: "Brown", color: "#92400E" },
+  { value: "black", label: "Black", color: "#1F2937" },
 ];
 
 const KIDS_BELTS = [
-  { value: "white", label: "White", color: "#FFFFFF" },
+  { value: "white", label: "White", color: "#E5E7EB" },
   { value: "grey-white", label: "Grey/White", color: "#9CA3AF" },
   { value: "grey", label: "Grey", color: "#6B7280" },
   { value: "grey-black", label: "Grey/Black", color: "#4B5563" },
@@ -76,119 +64,9 @@ const KIDS_BELTS = [
 
 const STRIPE_OPTIONS = [0, 1, 2, 3, 4];
 
-// ============================================
-// Helpers
-// ============================================
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-let __dbCache: any = null;
-async function waitForDb(maxMs = 5000) {
-  if (__dbCache) return __dbCache;
-  if (dbNullable) {
-    __dbCache = dbNullable;
-    return __dbCache;
-  }
-  try {
-    const db = getFirestore(auth.app);
-    __dbCache = db;
-    return __dbCache;
-  } catch {
-    // ignore
-  }
-  const start = Date.now();
-  while (!dbNullable) {
-    if (Date.now() - start > maxMs) return null;
-    await sleep(80);
-  }
-  __dbCache = dbNullable;
-  return __dbCache;
-}
-
-// ============================================
-// Sub-components
-// ============================================
-
-const Card = ({ children }: { children: React.ReactNode }) => (
-  <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">{children}</div>
-);
-
-const Alert = ({
-  kind,
-  children,
-}: {
-  kind: "error" | "success" | "info";
-  children: React.ReactNode;
-}) => {
-  const cls =
-    kind === "error"
-      ? "border-rose-200 bg-rose-50 text-rose-800"
-      : kind === "success"
-        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-        : "border-slate-200 bg-slate-50 text-slate-700";
-  return <div className={`rounded-2xl border px-4 py-3 text-sm ${cls}`}>{children}</div>;
-};
-
-const PrimaryBtn = ({
-  children,
-  onClick,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-  disabled?: boolean;
-}) => (
-  <button
-    type="button"
-    onClick={onClick}
-    disabled={disabled}
-    className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-  >
-    {children}
-  </button>
-);
-
-const GhostBtn = ({
-  children,
-  onClick,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-  disabled?: boolean;
-}) => (
-  <button
-    type="button"
-    onClick={onClick}
-    disabled={disabled}
-    className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
-  >
-    {children}
-  </button>
-);
-
-const OutlineBtn = ({
-  children,
-  onClick,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-  disabled?: boolean;
-}) => (
-  <button
-    type="button"
-    onClick={onClick}
-    disabled={disabled}
-    className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-  >
-    {children}
-  </button>
-);
-
-// ============================================
+// ─────────────────────────────────────────────
 // Main Component
-// ============================================
+// ─────────────────────────────────────────────
 
 export default function ProfileClient() {
   const router = useRouter();
@@ -211,10 +89,9 @@ export default function ProfileClient() {
   const [notes, setNotes] = useState("");
 
   // Derived
-  const dojoId = userProfile?.dojoId || userProfile?.staffProfile?.dojoId || userProfile?.studentProfile?.dojoId || null;
-  const dojoName = userProfile?.dojoName || userProfile?.staffProfile?.dojoName || userProfile?.studentProfile?.dojoName || null;
-  
-  // ✅ スタッフかどうか判定（スタッフは自分の帯等も編集可能）
+  const dojoId = userProfile?.dojoId || userProfile?.staffProfile?.dojoId || userProfile?.studentProfile?.dojoId || "";
+  const { dojoName } = useDojoName(dojoId);
+
   const isStaff = Boolean(
     userProfile?.staffProfile?.dojoId ||
     userProfile?.role === "owner" ||
@@ -226,8 +103,7 @@ export default function ProfileClient() {
 
   // Auth gate
   useEffect(() => {
-    if (authLoading) return;
-    if (!user) router.replace("/login");
+    if (!authLoading && !user) router.replace("/login");
   }, [authLoading, user, router]);
 
   // Load profile
@@ -239,28 +115,17 @@ export default function ProfileClient() {
       setError("");
 
       try {
-        const db = await waitForDb();
-        if (!db) {
-          setError("Database not available");
-          setLoading(false);
-          return;
-        }
+        const userSnap = await getDoc(doc(db, "users", user.uid));
 
-        // Load user profile
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        
         if (userSnap.exists()) {
           const userData = userSnap.data() as UserProfile;
           setUserProfile(userData);
           setDisplayName(userData.displayName || userData.studentProfile?.fullName || "");
 
-          // Load member profile if dojoId exists
           const did = userData.dojoId || userData.staffProfile?.dojoId || userData.studentProfile?.dojoId;
           if (did) {
-            const memberRef = doc(db, "dojos", did, "members", user.uid);
-            const memberSnap = await getDoc(memberRef);
-            
+            const memberSnap = await getDoc(doc(db, "dojos", did, "members", user.uid));
+
             if (memberSnap.exists()) {
               const memberData = memberSnap.data() as MemberProfile;
               setMemberProfile(memberData);
@@ -271,20 +136,15 @@ export default function ProfileClient() {
               setEmergencyContact(memberData.emergencyContact || "");
               setEmergencyPhone(memberData.emergencyPhone || "");
               setNotes(memberData.notes || "");
-            } else {
-              // Use studentProfile data if available
-              if (userData.studentProfile?.belt) {
-                setBeltRank(userData.studentProfile.belt);
-              }
+            } else if (userData.studentProfile?.belt) {
+              setBeltRank(userData.studentProfile.belt);
             }
           }
         } else {
-          // New user - set email as display name
           setDisplayName(user.email || "");
         }
       } catch (e: any) {
-        console.error("[Profile] load error:", e);
-        setError(e?.message || "Failed to load profile");
+        setError(e?.message || "Failed to load profile.");
       } finally {
         setLoading(false);
       }
@@ -296,42 +156,22 @@ export default function ProfileClient() {
   // Save profile
   const handleSave = async () => {
     if (!user) return;
-
     setSaving(true);
     setError("");
     setSuccess("");
 
     try {
-      const db = await waitForDb();
-      if (!db) throw new Error("Database not available");
-
       const now = serverTimestamp();
+      const userPatch: any = { displayName: displayName.trim(), updatedAt: now };
 
-      // Update user document
-      const userRef = doc(db, "users", user.uid);
-      const userPatch: any = {
-        displayName: displayName.trim(),
-        updatedAt: now,
-      };
-
-      // Update studentProfile if exists
       if (userProfile?.studentProfile) {
-        userPatch.studentProfile = {
-          ...userProfile.studentProfile,
-          fullName: displayName.trim(),
-        };
-        // ✅ スタッフのみ帯を更新可能
-        if (isStaff) {
-          userPatch.studentProfile.belt = beltRank;
-        }
+        userPatch.studentProfile = { ...userProfile.studentProfile, fullName: displayName.trim() };
+        if (isStaff) userPatch.studentProfile.belt = beltRank;
       }
 
-      await setDoc(userRef, userPatch, { merge: true });
+      await setDoc(doc(db, "users", user.uid), userPatch, { merge: true });
 
-      // Update member document if dojoId exists
-      // Note: beltRank, stripes, isKids are only updated for staff
       if (dojoId) {
-        const memberRef = doc(db, "dojos", dojoId, "members", user.uid);
         const memberPatch: any = {
           displayName: displayName.trim(),
           emergencyContact: emergencyContact.trim() || null,
@@ -339,56 +179,47 @@ export default function ProfileClient() {
           notes: notes.trim() || null,
           updatedAt: now,
         };
-
-        // ✅ スタッフのみ帯・ストライプ・キッズを更新可能
         if (isStaff) {
           memberPatch.beltRank = beltRank;
           memberPatch.stripes = stripes;
           memberPatch.isKids = isKids;
         }
-
-        await setDoc(memberRef, memberPatch, { merge: true });
+        await setDoc(doc(db, "dojos", dojoId, "members", user.uid), memberPatch, { merge: true });
       }
 
-      setSuccess("Profile saved successfully!");
+      setSuccess("Profile saved!");
       setTimeout(() => setSuccess(""), 3000);
     } catch (e: any) {
-      console.error("[Profile] save error:", e);
-      setError(e?.message || "Failed to save profile");
+      setError(e?.message || "Failed to save.");
     } finally {
       setSaving(false);
     }
   };
 
-  // Get belt options based on isKids
+  // Belt options
   const beltOptions = isKids ? KIDS_BELTS : ADULT_BELTS;
 
-  // Reset belt if switching between adult/kids and current belt is invalid
   useEffect(() => {
-    const validBelts = beltOptions.map((b) => b.value);
-    if (!validBelts.includes(beltRank)) {
-      setBeltRank("white");
-    }
+    const valid = beltOptions.map((b) => b.value);
+    if (!valid.includes(beltRank)) setBeltRank("white");
   }, [isKids, beltOptions, beltRank]);
 
-  // Get current belt color
-  const currentBeltColor = [...ADULT_BELTS, ...KIDS_BELTS].find((b) => b.value === beltRank)?.color || "#FFFFFF";
+  const currentBeltColor = [...ADULT_BELTS, ...KIDS_BELTS].find((b) => b.value === beltRank)?.color || "#E5E7EB";
 
-  // ============================================
+  // ─────────────────────────────────────────────
   // Render
-  // ============================================
+  // ─────────────────────────────────────────────
 
   if (authLoading || loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
-        <div className="mx-auto max-w-2xl p-4 sm:p-6">
-          <Card>
-            <div className="px-5 py-5 sm:px-6 sm:py-6">
-              <div className="text-slate-900 text-lg font-semibold">Loading…</div>
-              <div className="mt-1 text-sm text-slate-500">Fetching your profile</div>
-            </div>
-          </Card>
-        </div>
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <main className="max-w-2xl mx-auto px-4 py-8 pb-24">
+          <div className="flex justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+          </div>
+        </main>
+        <BottomNavigation />
       </div>
     );
   }
@@ -396,260 +227,153 @@ export default function ProfileClient() {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
-      <div className="mx-auto max-w-2xl p-4 sm:p-6 space-y-4">
+    <div className="min-h-screen bg-gray-50">
+      <Navigation />
+
+      <main className="max-w-2xl mx-auto px-4 py-8 pb-24 space-y-6">
         {/* Header */}
-        <Card>
-          <div className="px-5 py-4 sm:px-6 sm:py-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <GhostBtn onClick={() => router.back()}>← Back</GhostBtn>
-                <h1 className="mt-3 text-xl sm:text-2xl font-semibold text-slate-900">
-                  My Profile
-                </h1>
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-600">
-                  <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-700">
-                    ✉️ {user.email}
-                  </span>
-                  {dojoName && (
-                    <span className="inline-flex items-center rounded-full bg-violet-100 px-3 py-1 font-semibold text-violet-700">
-                      🥋 {dojoName}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <OutlineBtn
-                onClick={async () => {
-                  await auth.signOut();
-                  router.replace("/login");
-                }}
-              >
-                Sign Out
-              </OutlineBtn>
-            </div>
-          </div>
-        </Card>
-
-        {/* Messages */}
-        {error && <Alert kind="error">❌ {error}</Alert>}
-        {success && <Alert kind="success">✅ {success}</Alert>}
-
-        {/* Profile Form */}
-        <Card>
-          <div className="px-5 py-5 sm:px-6 sm:py-6 space-y-5">
-            <div className="text-base font-semibold text-slate-900">Basic Information</div>
-
-            {/* Display Name */}
-            <label className="block space-y-1">
-              <div className="text-sm font-semibold text-slate-700">Display Name *</div>
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="Your name"
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
-              />
-              <div className="text-xs text-slate-500">
-                This name will be displayed to instructors and other members.
-              </div>
-            </label>
-
-            {/* Kids Toggle - Editable for staff, display only for students */}
-            {isStaff ? (
-              <div className="flex items-center gap-3">
-                <label className="relative inline-flex cursor-pointer items-center">
-                  <input
-                    type="checkbox"
-                    checked={isKids}
-                    onChange={(e) => setIsKids(e.target.checked)}
-                    className="peer sr-only"
-                  />
-                  <div className="peer h-6 w-11 rounded-full bg-slate-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-violet-500 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-violet-300"></div>
-                </label>
-                <span className="text-sm font-semibold text-slate-700">Kids Program</span>
-                {isKids && (
-                  <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">
-                    キッズ
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 text-sm mb-3">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                Back
+              </button>
+              <h1 className="text-2xl font-bold text-gray-900">My Profile</h1>
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm font-medium">
+                  ✉️ {user.email}
+                </span>
+                {dojoName && (
+                  <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
+                    🥋 {dojoName}
                   </span>
                 )}
               </div>
-            ) : (
-              <div className="flex items-center gap-3">
-                <div className={`flex h-6 w-11 items-center rounded-full ${isKids ? 'bg-violet-500' : 'bg-slate-200'}`}>
-                  <div className={`h-5 w-5 rounded-full border bg-white transition-transform ${isKids ? 'translate-x-5 border-white' : 'translate-x-0.5 border-slate-300'}`} />
-                </div>
-                <span className="text-sm font-semibold text-slate-700">Kids Program</span>
-                {isKids && (
-                  <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">
-                    キッズ
-                  </span>
-                )}
-                <span className="text-xs text-slate-500">(Managed by staff)</span>
-              </div>
-            )}
-
-            {/* Belt Rank - Editable for staff, display only for students */}
-            {isStaff ? (
-              <label className="block space-y-1">
-                <div className="text-sm font-semibold text-slate-700">Belt Rank</div>
-                <div className="flex items-center gap-3">
-                  <div
-                    className="h-8 w-16 rounded border border-slate-300"
-                    style={{ backgroundColor: currentBeltColor }}
-                  />
-                  <select
-                    value={beltRank}
-                    onChange={(e) => setBeltRank(e.target.value)}
-                    className="flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                  >
-                    {beltOptions.map((belt) => (
-                      <option key={belt.value} value={belt.value}>
-                        {belt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </label>
-            ) : (
-              <div className="block space-y-1">
-                <div className="text-sm font-semibold text-slate-700">Belt Rank</div>
-                <div className="flex items-center gap-3">
-                  <div
-                    className="h-8 w-16 rounded border border-slate-300"
-                    style={{ backgroundColor: currentBeltColor }}
-                  />
-                  <span className="text-slate-900 font-medium">
-                    {beltOptions.find((b) => b.value === beltRank)?.label || "White"}
-                  </span>
-                  <span className="text-xs text-slate-500">(Managed by staff)</span>
-                </div>
-              </div>
-            )}
-
-            {/* Stripes - Editable for staff, display only for students */}
-            {isStaff ? (
-              <label className="block space-y-1">
-                <div className="text-sm font-semibold text-slate-700">Stripes</div>
-                <div className="flex items-center gap-2">
-                  {STRIPE_OPTIONS.map((num) => (
-                    <button
-                      key={num}
-                      type="button"
-                      onClick={() => setStripes(num)}
-                      className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold transition ${
-                        stripes === num
-                          ? "bg-slate-900 text-white"
-                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      }`}
-                    >
-                      {num}
-                    </button>
-                  ))}
-                  <div className="ml-2 flex items-center gap-1">
-                    {Array.from({ length: stripes }).map((_, i) => (
-                      <div
-                        key={i}
-                        className="h-4 w-1 rounded bg-white border border-slate-400"
-                      />
-                    ))}
-                  </div>
-                </div>
-              </label>
-            ) : (
-              <div className="block space-y-1">
-                <div className="text-sm font-semibold text-slate-700">Stripes</div>
-                <div className="flex items-center gap-2">
-                  {STRIPE_OPTIONS.map((num) => (
-                    <div
-                      key={num}
-                      className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold ${
-                        stripes === num
-                          ? "bg-slate-900 text-white"
-                          : "bg-slate-100 text-slate-400"
-                      }`}
-                    >
-                      {num}
-                    </div>
-                  ))}
-                  <div className="ml-2 flex items-center gap-1">
-                    {Array.from({ length: stripes }).map((_, i) => (
-                      <div
-                        key={i}
-                        className="h-4 w-1 rounded bg-white border border-slate-400"
-                      />
-                    ))}
-                  </div>
-                  <span className="text-xs text-slate-500 ml-2">(Managed by staff)</span>
-                </div>
-              </div>
-            )}
-          </div>
-        </Card>
-
-        {/* Emergency Contact */}
-        <Card>
-          <div className="px-5 py-5 sm:px-6 sm:py-6 space-y-5">
-            <div className="text-base font-semibold text-slate-900">Emergency Contact (Optional)</div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <label className="block space-y-1">
-                <div className="text-sm font-semibold text-slate-700">Contact Name</div>
-                <input
-                  type="text"
-                  value={emergencyContact}
-                  onChange={(e) => setEmergencyContact(e.target.value)}
-                  placeholder="e.g. Parent, Guardian"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                />
-              </label>
-
-              <label className="block space-y-1">
-                <div className="text-sm font-semibold text-slate-700">Phone Number</div>
-                <input
-                  type="tel"
-                  value={emergencyPhone}
-                  onChange={(e) => setEmergencyPhone(e.target.value)}
-                  placeholder="e.g. 123-456-7890"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                />
-              </label>
             </div>
-
-            <label className="block space-y-1">
-              <div className="text-sm font-semibold text-slate-700">Notes / Medical Info</div>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Any allergies, medical conditions, or other notes..."
-                rows={3}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 resize-none"
-              />
-            </label>
+            <button
+              onClick={async () => { await auth.signOut(); router.replace("/login"); }}
+              className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              Sign Out
+            </button>
           </div>
-        </Card>
-
-        {/* Save Button */}
-        <div className="flex justify-end gap-3">
-          <GhostBtn onClick={() => router.back()} disabled={saving}>
-            Cancel
-          </GhostBtn>
-          <PrimaryBtn onClick={handleSave} disabled={saving || !displayName.trim()}>
-            {saving ? "Saving..." : "Save Profile"}
-          </PrimaryBtn>
         </div>
 
-        {/* Debug Info */}
-        {dojoId && (
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">
-            <div className="font-mono">
-              User ID: {user.uid}
-              <br />
-              Dojo ID: {dojoId}
+        {/* Messages */}
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>}
+        {success && <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg">{success}</div>}
+
+        {/* Basic Info */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 space-y-5">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Basic Information</h2>
+
+          {/* Display Name */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Display Name *</label>
+            <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Your name"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <p className="text-xs text-gray-400 mt-1">Displayed to instructors and other members.</p>
+          </div>
+
+          {/* Kids Toggle */}
+          <div className="flex items-center gap-3">
+            {isStaff ? (
+              <label className="relative inline-flex cursor-pointer items-center">
+                <input type="checkbox" checked={isKids} onChange={(e) => setIsKids(e.target.checked)} className="peer sr-only" />
+                <div className="peer h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-purple-500 peer-checked:after:translate-x-full peer-checked:after:border-white" />
+              </label>
+            ) : (
+              <div className={`h-6 w-11 rounded-full ${isKids ? "bg-purple-500" : "bg-gray-200"} flex items-center`}>
+                <div className={`h-5 w-5 rounded-full bg-white border transition-transform ${isKids ? "translate-x-5 border-white" : "translate-x-0.5 border-gray-300"}`} />
+              </div>
+            )}
+            <span className="text-sm font-medium text-gray-700">Kids Program</span>
+            {isKids && <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">Kids</span>}
+            {!isStaff && <span className="text-xs text-gray-400">(Managed by staff)</span>}
+          </div>
+
+          {/* Belt Rank */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Belt Rank</label>
+            <div className="flex items-center gap-3">
+              <div className="w-16 h-4 rounded-sm" style={{ backgroundColor: currentBeltColor, border: "1px solid #D1D5DB" }} />
+              {isStaff ? (
+                <select value={beltRank} onChange={(e) => setBeltRank(e.target.value)}
+                  className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  {beltOptions.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
+                </select>
+              ) : (
+                <>
+                  <span className="text-sm font-medium text-gray-900">{beltOptions.find((b) => b.value === beltRank)?.label || "White"}</span>
+                  <span className="text-xs text-gray-400">(Managed by staff)</span>
+                </>
+              )}
             </div>
           </div>
-        )}
-      </div>
+
+          {/* Stripes */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Stripes</label>
+            <div className="flex items-center gap-2">
+              {STRIPE_OPTIONS.map((n) => (
+                isStaff ? (
+                  <button key={n} onClick={() => setStripes(n)}
+                    className={`w-10 h-10 rounded-lg text-sm font-bold transition ${stripes === n ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
+                    {n}
+                  </button>
+                ) : (
+                  <div key={n} className={`w-10 h-10 rounded-lg text-sm font-bold flex items-center justify-center ${stripes === n ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-300"}`}>
+                    {n}
+                  </div>
+                )
+              ))}
+              <div className="ml-2 flex items-center gap-1">
+                {Array.from({ length: stripes }).map((_, i) => (
+                  <div key={i} className="h-4 w-1.5 rounded-sm bg-white border border-gray-400" />
+                ))}
+              </div>
+              {!isStaff && <span className="text-xs text-gray-400 ml-2">(Managed by staff)</span>}
+            </div>
+          </div>
+        </div>
+
+        {/* Emergency Contact */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 space-y-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Emergency Contact</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Contact Name</label>
+              <input type="text" value={emergencyContact} onChange={(e) => setEmergencyContact(e.target.value)} placeholder="e.g. Parent, Guardian"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+              <input type="tel" value={emergencyPhone} onChange={(e) => setEmergencyPhone(e.target.value)} placeholder="e.g. 123-456-7890"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes / Medical Info</label>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Allergies, medical conditions, etc."
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+          </div>
+        </div>
+
+        {/* Save */}
+        <div className="flex justify-end gap-3">
+          <button onClick={() => router.back()} disabled={saving}
+            className="px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition disabled:opacity-50">
+            Cancel
+          </button>
+          <button onClick={handleSave} disabled={saving || !displayName.trim()}
+            className="px-4 py-2.5 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50">
+            {saving ? "Saving..." : "Save Profile"}
+          </button>
+        </div>
+      </main>
+
+      <BottomNavigation />
     </div>
   );
 }
