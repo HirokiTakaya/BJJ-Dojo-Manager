@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { Suspense, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { auth, db } from "@/firebase";
-import { createUserWithEmailAndPassword, updateProfile, sendEmailVerification } from "firebase/auth";
+// ✅ FIX: authNullable を使う（auth は Firebase未初期化時にクラッシュする）
+import { authNullable, dbNullable } from "@/firebase";
+import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
 // ─────────────────────────────────────────────────────────────
@@ -94,11 +95,25 @@ const GhostBtn = ({
 // ─────────────────────────────────────────────────────────────
 // Main Component
 // ─────────────────────────────────────────────────────────────
-export default function RegisterDetailsClient() {
+export default function RegisterDetailsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex items-center justify-center">
+          <div className="text-slate-500">Loading...</div>
+        </div>
+      }
+    >
+      <RegisterDetailsInner />
+    </Suspense>
+  );
+}
+
+function RegisterDetailsInner() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const roleUi = (sp.get("role") || "").toLowerCase(); // student | staff
+  const roleUi = (sp.get("role") || "").toLowerCase();
   const role = useMemo(() => {
     if (roleUi === "staff") return "staff_member";
     if (roleUi === "student") return "student";
@@ -137,11 +152,15 @@ export default function RegisterDetailsClient() {
 
     setLoading(true);
     try {
+      // ✅ FIX: authNullable / dbNullable を使い、null チェック
+      if (!authNullable) throw new Error("Auth is not ready. Please refresh the page.");
+      if (!dbNullable) throw new Error("Database is not ready. Please refresh the page.");
+
       const normalizedEmail = email.trim().toLowerCase();
       const displayName = name.trim();
       const displayNameLower = displayName.toLowerCase();
 
-      const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+      const cred = await createUserWithEmailAndPassword(authNullable, normalizedEmail, password);
 
       // UIをブロックしないため先に遷移
       goVerify();
@@ -150,13 +169,12 @@ export default function RegisterDetailsClient() {
 
       tasks.push(updateProfile(cred.user, { displayName }).catch(() => undefined));
 
-      // roles map（roles.student = true みたいに検索可能）
       const rolesMap: Record<string, boolean> = {};
       rolesMap[role] = true;
 
       tasks.push(
         setDoc(
-          doc(db, "users", cred.user.uid),
+          doc(dbNullable, "users", cred.user.uid),
           {
             role,
             roles: rolesMap,
@@ -177,8 +195,10 @@ export default function RegisterDetailsClient() {
         ).catch(() => undefined)
       );
 
-      tasks.push(sendEmailVerification(cred.user).catch(() => undefined));
-      Promise.allSettled(tasks);
+      // メール認証は /verify で sendSignInLinkToEmail() が送信するため不要
+
+      // ✅ FIX: await を追加（元は await なしで fire-and-forget だった）
+      await Promise.allSettled(tasks);
     } catch (err: any) {
       if (err?.code === "auth/email-already-in-use") setError("This email is already registered.");
       else if (err?.code === "auth/weak-password") setError("Password must be at least 6 characters.");
@@ -200,7 +220,7 @@ export default function RegisterDetailsClient() {
           <img
             src="/assets/jiujitsu-samurai-Logo.png"
             alt="Logo"
-            className="w-16 h-16 mx-auto mb-4 rounded-2xl"
+            className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-lg"
           />
           <h1 className="text-2xl font-bold text-slate-900">Create Your Account</h1>
           <p className="mt-2 text-sm text-slate-500">Sign up to get started</p>
@@ -262,7 +282,7 @@ export default function RegisterDetailsClient() {
                 {loading ? "Creating account…" : "Sign Up & Verify Email"}
               </PrimaryBtn>
             </div>
-          </div>
+          </div
         </Card>
 
         {/* Footer Links */}

@@ -1,0 +1,56 @@
+{
+  "name": "dojo-manager-desktop",
+  "version": "0.1.0",
+  "description": "Dojo Manager Desktop App",
+  "author": "Hiroki Takaya",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k \"npm --prefix ../frontend run dev\" \"wait-on http://localhost:3000 && electron .\"",
+
+    "build:web": "npm --prefix ../frontend run build",
+
+    "dist:mac": "npm run build:web && npx electron-builder --mac dmg zip",
+    "dist:mac-unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:web && npx electron-builder --mac dmg zip"
+  },
+  "build": {
+    "appId": "com.hirokitakaya.dojomanager",
+    "productName": "Dojo Manager",
+    "directories": {
+      "output": "dist"
+    },
+
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
+      ],
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "icon": "build/icon.icns"
+    },
+
+    "files": [
+      "**/*",
+      "!dist/**"
+    ],
+
+    "extraResources": [
+      {
+        "from": "../frontend/.next/standalone",
+        "to": "next",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../frontend/.next/static",
+        "to": "next/.next/static",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../frontend/public",
+        "to": "next/public",
+        "filter": ["**/*"]
+      }
+    ]
+  }
+}

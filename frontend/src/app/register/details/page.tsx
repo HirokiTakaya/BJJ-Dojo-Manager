@@ -103,7 +103,7 @@ function RegisterDetailsInner() {
         ).catch(() => undefined)
       );
 
-      tasks.push(sendEmailVerification(cred.user).catch(() => undefined));
+      // tasks.push(sendEmailVerification(cred.user).catch(() => undefined));
       Promise.allSettled(tasks);
     } catch (err: any) {
       if (err?.code === "auth/email-already-in-use") setToastMsg("This email is already registered.");

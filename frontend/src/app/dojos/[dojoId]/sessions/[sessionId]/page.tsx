@@ -1,8 +1,7 @@
+
 import { Suspense } from "react";
 import SessionDetailClient from "./SessionDetailClient";
 
-export const dynamic = "force-dynamic";
-export const dynamicParams = true;
 
 export default function SessionDetailPage() {
   return (

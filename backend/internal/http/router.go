@@ -15,6 +15,7 @@ import (
 	"dojo-manager/backend/internal/domain/notifications"
 	"dojo-manager/backend/internal/domain/profile"
 	"dojo-manager/backend/internal/domain/ranks"
+	"dojo-manager/backend/internal/domain/retention"
 	"dojo-manager/backend/internal/domain/session"
 	"dojo-manager/backend/internal/domain/stats"
 	stripedom "dojo-manager/backend/internal/domain/stripe"
@@ -39,7 +40,8 @@ type RouterDeps struct {
 	NotificationsSvc *notifications.Service
 	MembersSvc       *members.Service
 	ProfileSvc       *profile.Service
-	StripeSvc        *stripedom.Service // Stripe service
+	StripeSvc        *stripedom.Service
+	RetentionSvc     *retention.Service
 }
 
 func NewRouter(d RouterDeps) http.Handler {
@@ -66,6 +68,30 @@ func NewRouter(d RouterDeps) http.Handler {
 				"email":  au.Email,
 				"claims": au.Claims,
 			})
+		})
+
+		// ===== Auth: Reset email verified (for per-login verification) =====
+		pr.Post("/v1/auth/reset-email-verified", func(w http.ResponseWriter, r *http.Request) {
+			au, _ := middleware.GetAuthUser(r.Context())
+			if au.UID == "" {
+				Fail(w, 401, "unauthorized")
+				return
+			}
+
+			if d.AuthClient == nil {
+				Fail(w, 500, "auth client is not configured")
+				return
+			}
+
+			// Admin SDK で emailVerified を false にリセット
+			params := (&auth.UserToUpdate{}).EmailVerified(false)
+			_, err := d.AuthClient.UpdateUser(r.Context(), au.UID, params)
+			if err != nil {
+				Fail(w, 500, "failed to reset email verification: "+err.Error())
+				return
+			}
+
+			WriteJSON(w, 200, map[string]any{"success": true})
 		})
 
 		// ===== Dojo routes =====
@@ -851,6 +877,68 @@ func NewRouter(d RouterDeps) http.Handler {
 			})
 		}
 
+		// ===== Retention Alerts routes =====
+		if d.RetentionSvc != nil {
+			// Get retention alerts (staff only)
+			pr.Get("/v1/dojos/{dojoId}/retention/alerts", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+				dojoId := chi.URLParam(r, "dojoId")
+				if dojoId == "" {
+					Fail(w, 400, "missing dojoId")
+					return
+				}
+
+				out, err := d.RetentionSvc.GetAlerts(r.Context(), au.UID, dojoId)
+				if err != nil {
+					status, msg := mapRetentionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, out)
+			})
+
+			// Get retention settings
+			pr.Get("/v1/dojos/{dojoId}/retention/settings", func(w http.ResponseWriter, r *http.Request) {
+				dojoId := chi.URLParam(r, "dojoId")
+				if dojoId == "" {
+					Fail(w, 400, "missing dojoId")
+					return
+				}
+
+				settings, err := d.RetentionSvc.GetSettings(r.Context(), dojoId)
+				if err != nil {
+					status, msg := mapRetentionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, settings)
+			})
+
+			// Update retention settings (staff only)
+			pr.Put("/v1/dojos/{dojoId}/retention/settings", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+				dojoId := chi.URLParam(r, "dojoId")
+				if dojoId == "" {
+					Fail(w, 400, "missing dojoId")
+					return
+				}
+
+				var in retention.UpdateSettingsInput
+				if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+					Fail(w, 400, "invalid json")
+					return
+				}
+
+				settings, err := d.RetentionSvc.UpdateSettings(r.Context(), au.UID, dojoId, in)
+				if err != nil {
+					status, msg := mapRetentionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, settings)
+			})
+		}
+
 		// ===== Profile routes =====
 		if d.ProfileSvc != nil {
 			// Get profile
@@ -1216,6 +1304,22 @@ func mapStripeError(err error) (int, string) {
 		return 400, err.Error()
 	case stripedom.IsErrLimitReached(err):
 		return 402, err.Error()
+	default:
+		return 500, err.Error()
+	}
+}
+
+func mapRetentionError(err error) (int, string) {
+	if err == nil {
+		return 500, "unknown error"
+	}
+	switch {
+	case retention.IsErrUnauthorized(err):
+		return 403, err.Error()
+	case retention.IsErrNotFound(err):
+		return 404, err.Error()
+	case retention.IsErrBadRequest(err):
+		return 400, err.Error()
 	default:
 		return 500, err.Error()
 	}

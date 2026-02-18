@@ -367,7 +367,7 @@ export async function performSignup(data: SignupData): Promise<SignupResult> {
 
     // 5. Send verification email
     console.log("[Signup] Sending verification email...");
-    await sendEmailVerification(createdUser).catch((e) => {
+    // await sendEmailVerification(createdUser).catch((e) => {
       console.warn("[Signup] Failed to send verification email:", e);
     });
 

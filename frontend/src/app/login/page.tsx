@@ -3,10 +3,11 @@
 
 import React, { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signInWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
+import { signInWithEmailAndPassword } from "firebase/auth";
 import { authNullable } from "@/firebase";
 import GoogleSignInButton from "@/components/auth/GoogleSignInButton";
 import { handleGoogleRedirectResult } from "@/lib/google";
+import { navigateAfterAuth } from "@/lib/navigateAfterAuth";
 
 // ─────────────────────────────────────────────────────────────
 // Sub-components
@@ -105,7 +106,17 @@ function LoginInner() {
         if (result.needsRoleSelection) {
           router.push("/register/select");
         } else {
-          router.push(next);
+          // ✅ FIX: Google ログインでも必ず emailVerified チェック
+          // handleGoogleRedirectResult が user を返す場合はそれを使う
+          // 返さない場合は auth.currentUser から取得
+          const user =
+            (result as any).user ??
+            (authNullable ? authNullable.currentUser : null);
+          if (user) {
+            navigateAfterAuth(user, router, next);
+          } else {
+            router.push(next);
+          }
         }
       } else if (result?.error) {
         setError(result.error);
@@ -133,19 +144,24 @@ function LoginInner() {
         password
       );
 
+      // ✅ FIX: emailVerified チェックを統一関数で行う
       if (!cred.user.emailVerified) {
-        await sendEmailVerification(cred.user).catch(() => {});
-        setSuccess("Please verify your email first.");
+        // メール認証は /verify で sendSignInLinkToEmail() が送信するため不要
+        setSuccess("Please verify your email first. Redirecting...");
         setTimeout(() => router.push("/verify"), 1500);
         return;
       }
 
       setSuccess("Login successful!");
-      router.push(next);
+      navigateAfterAuth(cred.user, router, next);
     } catch (err: any) {
       console.error("[Login] Error:", err);
 
-      if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
+      if (
+        err.code === "auth/user-not-found" ||
+        err.code === "auth/wrong-password" ||
+        err.code === "auth/invalid-credential"
+      ) {
         setError("Invalid email or password.");
       } else if (err.code === "auth/too-many-requests") {
         setError("Too many attempts. Please try again later.");

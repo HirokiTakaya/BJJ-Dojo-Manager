@@ -1,3 +1,4 @@
+
 // app/dojos/[dojoId]/settings/page.tsx
 'use client';
 

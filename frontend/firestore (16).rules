@@ -1,0 +1,867 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 1: CORE AUTHENTICATION HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function isSelf(userId) {
+      return signedIn() && uid() == userId;
+    }
+
+    function token() {
+      return request.auth.token;
+    }
+
+    // ✅ セッション認証済みかどうか（Firestore の sessionVerified フラグで判定）
+    //
+    // 毎回ログイン時に sessionVerified = false にリセットされ、
+    // メールリンクをクリックすると true になる。
+    // Firebase Auth の email_verified には依存しない。
+    //
+    // ⚠️ get() は rules の呼び出しあたり最大10回までの制限あり。
+    //    1リクエストで verified() を複数回呼ぶヘルパーが連鎖すると
+    //    上限に達する可能性がある。キャッシュは自動で効くので
+    //    同一パスの get() は1回分としてカウントされる。
+    function verified() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.sessionVerified == true;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 2: DATA VALIDATION HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function hasOnlyKeys(data, keys) {
+      return data.keys().hasOnly(keys);
+    }
+
+    function hasRequiredKeys(data, keys) {
+      return data.keys().hasAll(keys);
+    }
+
+    function isNonEmptyString(v) {
+      return v is string && v.size() > 0;
+    }
+
+    function isShortString(v, max) {
+      return v is string && v.size() > 0 && v.size() <= max;
+    }
+
+    // ✅ NEW: フィールド長の上限チェック（任意フィールド用、存在すれば長さチェック）
+    function optStringMaxLen(data, field, max) {
+      return !(field in data) || (data[field] is string && data[field].size() <= max);
+    }
+
+    // ✅ Reservation validation helpers
+    function isValidReservationStatus(s) {
+      return s in ['confirmed', 'cancelled'];
+    }
+
+    function reservationWriteOk(dojoId, sessionId, memberUid) {
+      let d = request.resource.data;
+
+      return
+        ('memberId' in d) && (d.memberId == memberUid) &&
+        ('memberName' in d) && isNonEmptyString(d.memberName) &&
+        // ✅ NEW: memberName 長さ制限
+        d.memberName.size() <= 100 &&
+        ('status' in d) && isValidReservationStatus(d.status) &&
+        (!('dojoId' in d) || d.dojoId == dojoId) &&
+        (!('sessionId' in d) || d.sessionId == sessionId) &&
+        (!('addedByStaff' in d) || d.addedByStaff is bool) &&
+        (!('createdAt' in d) || d.createdAt is timestamp) &&
+        (!('updatedAt' in d) || d.updatedAt is timestamp);
+    }
+
+    // ✅ Waiver validation helpers
+    function isValidWaiverSignerType(t) {
+      return t in ['visitor', 'member'];
+    }
+
+    function isValidWaiverSubmissionStatus(s) {
+      return s in ['new', 'reviewed', 'void'];
+    }
+
+    function hasContactInfo(d) {
+      return
+        (('visitorEmail' in d) && (d.visitorEmail is string) && d.visitorEmail.size() > 0) ||
+        (('visitorPhone' in d) && (d.visitorPhone is string) && d.visitorPhone.size() > 0) ||
+        (('memberEmail' in d) && (d.memberEmail is string) && d.memberEmail.size() > 0);
+    }
+
+    // ✅ 署名データチェック（strokes は JSON 文字列として保存）
+    function signatureOk(d) {
+      return ('signature' in d) &&
+        (d.signature is map) &&
+        ('type' in d.signature) &&
+        (d.signature.type is string) &&
+        (
+          (d.signature.type == 'strokes' &&
+            ('strokesJson' in d.signature) &&
+            (d.signature.strokesJson is string) &&
+            (d.signature.strokesJson.size() > 2) &&
+            (d.signature.strokesJson.size() <= 500000) &&
+            ('strokeCount' in d.signature) &&
+            (d.signature.strokeCount is int) &&
+            (d.signature.strokeCount > 0)
+          )
+          || (d.signature.type == 'image' &&
+              ('imageUrl' in d.signature) &&
+              (d.signature.imageUrl is string) &&
+              d.signature.imageUrl.size() > 0
+          )
+        );
+    }
+
+    function waiverSubmissionCreateOk(dojoId) {
+      let d = request.resource.data;
+
+      return
+        ('dojoId' in d) && (d.dojoId == dojoId) &&
+        ('signerType' in d) && isValidWaiverSignerType(d.signerType) &&
+        ('agreed' in d) && (d.agreed == true) &&
+        ('status' in d) && (d.status == 'new') &&
+        signatureOk(d) &&
+        ('templateId' in d) && (d.templateId is string) && (d.templateId.size() > 0) &&
+        ('authUid' in d) && (d.authUid == uid()) &&
+        (
+          (d.signerType == 'visitor' &&
+            ('visitorName' in d) && isNonEmptyString(d.visitorName) &&
+            // ✅ NEW: visitorName 長さ制限
+            d.visitorName.size() <= 100 &&
+            hasContactInfo(d) &&
+            (!('isMinor' in d) || d.isMinor is bool) &&
+            (!(('isMinor' in d) && d.isMinor == true) || (('guardianName' in d) && isNonEmptyString(d.guardianName)))
+          )
+          ||
+          (d.signerType == 'member' &&
+            ('memberUid' in d) && (d.memberUid == uid())
+          )
+        ) &&
+        (!('signedAt' in d) || d.signedAt is timestamp) &&
+        (!('createdAt' in d) || d.createdAt is timestamp) &&
+        (!('updatedAt' in d) || d.updatedAt is timestamp) &&
+        (!('confirmationCode' in d) || (d.confirmationCode is string && d.confirmationCode.size() <= 12));
+    }
+
+    function waiverSubmissionStaffUpdateOk() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+        'status',
+        'reviewedBy',
+        'reviewedAt',
+        'updatedAt',
+        'notes'
+      ]) &&
+      ('status' in request.resource.data) &&
+      isValidWaiverSubmissionStatus(request.resource.data.status) &&
+      (!('reviewedAt' in request.resource.data) || request.resource.data.reviewedAt is timestamp) &&
+      (!('updatedAt' in request.resource.data) || request.resource.data.updatedAt is timestamp) &&
+      (!('reviewedBy' in request.resource.data) || request.resource.data.reviewedBy is string) &&
+      // ✅ NEW: notes 長さ制限
+      (!('notes' in request.resource.data) || (request.resource.data.notes is string && request.resource.data.notes.size() <= 2000));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 3: USER DOCUMENT HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function userPath(userId) {
+      return /databases/$(database)/documents/users/$(userId);
+    }
+
+    function myUserPath() {
+      return userPath(uid());
+    }
+
+    function userExists(userId) {
+      return signedIn() && exists(userPath(userId));
+    }
+
+    function myUserExists() {
+      return signedIn() && exists(myUserPath());
+    }
+
+    function userData(userId) {
+      return userExists(userId) ? get(userPath(userId)).data : null;
+    }
+
+    function myUser() {
+      return myUserExists() ? get(myUserPath()).data : null;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 4: ROLE HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function tokenHasRole(r) {
+      return signedIn() && (
+        token().role == r ||
+        token().roleUi == r ||
+        token().userType == r ||
+        token().accountType == r ||
+        (token().roles is list && (r in token().roles)) ||
+        (token().roles is map && token().roles[r] == true) ||
+        token()[r] == true
+      );
+    }
+
+    function isAdmin() {
+      return signedIn() && (
+        tokenHasRole('admin') ||
+        token().admin == true
+      );
+    }
+
+    function isStaffByToken() {
+      return signedIn() && (
+        isAdmin() ||
+        tokenHasRole('staff') ||
+        tokenHasRole('staff_member') ||
+        tokenHasRole('coach') ||
+        tokenHasRole('owner') ||
+        token().staff == true ||
+        token().owner == true ||
+        token().coach == true
+      );
+    }
+
+    function userDocHasRole(r) {
+      return myUserExists() && myUser() != null && (
+        myUser().role == r ||
+        (myUser().roles is list && (r in myUser().roles)) ||
+        (myUser().roles is map && myUser().roles[r] == true)
+      );
+    }
+
+    function isStaffByUserDoc() {
+      return userDocHasRole('staff') ||
+             userDocHasRole('staff_member') ||
+             userDocHasRole('owner') ||
+             userDocHasRole('coach');
+    }
+
+    function isStaff() {
+      return isStaffByToken() || isStaffByUserDoc();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 5: DOJO HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function dojoPath(dojoId) {
+      return /databases/$(database)/documents/dojos/$(dojoId);
+    }
+
+    function dojoExists(dojoId) {
+      return exists(dojoPath(dojoId));
+    }
+
+    function dojoData(dojoId) {
+      return dojoExists(dojoId) ? get(dojoPath(dojoId)).data : null;
+    }
+
+    function isPublicDojo(dojoId) {
+      let data = dojoData(dojoId);
+      return data != null && data.isPublic == true;
+    }
+
+    function dojoOwnerIds(dojoId) {
+      let data = dojoData(dojoId);
+      return data != null
+        ? (
+            (data.ownerIds is list) ? data.ownerIds :
+            ((data.ownerUid is string) ? [data.ownerUid] :
+            ((data.ownerId is string) ? [data.ownerId] :
+            ((data.createdBy is string) ? [data.createdBy] : [])))
+          )
+        : [];
+    }
+
+    function isDojoOwner(dojoId) {
+      let owners = dojoOwnerIds(dojoId);
+      return signedIn() && (
+        isAdmin() ||
+        (owners.size() > 0 && (uid() in owners))
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 6: MEMBER HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function memberPath(dojoId, memberUid) {
+      return /databases/$(database)/documents/dojos/$(dojoId)/members/$(memberUid);
+    }
+
+    function memberExists(dojoId, memberUid) {
+      return signedIn() && exists(memberPath(dojoId, memberUid));
+    }
+
+    function isMember(dojoId) {
+      return memberExists(dojoId, uid());
+    }
+
+    function memberData(dojoId, memberUid) {
+      return memberExists(dojoId, memberUid) ? get(memberPath(dojoId, memberUid)).data : null;
+    }
+
+    function myMemberData(dojoId) {
+      return memberData(dojoId, uid());
+    }
+
+    function myMemberStatus(dojoId) {
+      let data = myMemberData(dojoId);
+      return data != null
+        ? (('status' in data) ? data.status : 'approved')
+        : null;
+    }
+
+    function isApprovedMember(dojoId) {
+      let status = myMemberStatus(dojoId);
+      return status == 'approved' || status == 'active';
+    }
+
+    function myMemberRole(dojoId) {
+      let data = myMemberData(dojoId);
+      return data != null
+        ? (
+            ('roleInDojo' in data) ? data.roleInDojo :
+            (('role' in data) ? data.role : 'student')
+          )
+        : null;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 7: USER-DOJO ASSOCIATION HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function userBelongsToDojo(dojoId) {
+      let user = myUser();
+      return signedIn() && myUserExists() && user != null && (
+        (('dojoId' in user) && (user.dojoId is string) && (user.dojoId == dojoId)) ||
+        (('staffProfile' in user) && (user.staffProfile is map) &&
+         ('dojoId' in user.staffProfile) && (user.staffProfile.dojoId is string) &&
+         (user.staffProfile.dojoId == dojoId)) ||
+        (('studentProfile' in user) && (user.studentProfile is map) &&
+         ('dojoId' in user.studentProfile) && (user.studentProfile.dojoId is string) &&
+         (user.studentProfile.dojoId == dojoId))
+      );
+    }
+
+    function isMyDojo(dojoId) {
+      return userBelongsToDojo(dojoId);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 8: DOJO STAFF HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function isStaffRoleInUserDoc() {
+      let user = myUser();
+      return user != null && 'role' in user && (
+        user.role == 'staff_member' ||
+        user.role == 'staff' ||
+        user.role == 'owner' ||
+        user.role == 'coach'
+      );
+    }
+
+    function isStaffOfDojoByUserDoc(dojoId) {
+      return myUserExists() && isStaffRoleInUserDoc() && isMyDojo(dojoId);
+    }
+
+    function isStaffOfDojoByMemberDoc(dojoId) {
+      let role = myMemberRole(dojoId);
+      return isMember(dojoId) && role != null && (role in ['owner', 'staff', 'staff_member', 'coach', 'admin']);
+    }
+
+    function isStaffOfDojoByToken(dojoId) {
+      return signedIn() && (
+        (token().dojoId == dojoId && (token().staff == true || token().owner == true || token().coach == true)) ||
+        (token().dojoId == dojoId && token().role in ['staff', 'staff_member', 'owner', 'coach', 'admin'])
+      );
+    }
+
+    function isDojoStaff(dojoId) {
+      return signedIn() && (
+        isAdmin() ||
+        isDojoOwner(dojoId) ||
+        isStaffOfDojoByToken(dojoId) ||
+        isStaffOfDojoByUserDoc(dojoId) ||
+        isStaffOfDojoByMemberDoc(dojoId)
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 9: CONTENT ACCESS HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function canReadDojoContent(dojoId) {
+      return signedIn() && (
+        isDojoStaff(dojoId) ||
+        isApprovedMember(dojoId) ||
+        isMember(dojoId) ||
+        isMyDojo(dojoId)
+      );
+    }
+
+    function canReadSchedule(dojoId) {
+      return signedIn() && (
+        isAdmin() ||
+        isStaffOfDojoByToken(dojoId) ||
+        exists(memberPath(dojoId, uid())) ||
+        userBelongsToDojo(dojoId) ||
+        isDojoOwner(dojoId)
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 10: NOTICE HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function noticeInboxPath(dojoId, memberUid, noticeId) {
+      return /databases/$(database)/documents/dojos/$(dojoId)/members/$(memberUid)/noticeInbox/$(noticeId);
+    }
+
+    function hasInboxForNotice(dojoId, noticeId) {
+      return signedIn() && exists(noticeInboxPath(dojoId, uid(), noticeId));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 11: FIELD LENGTH VALIDATION HELPERS  ← ✅ NEW SECTION
+    // ═══════════════════════════════════════════════════════════════
+
+    // members/{memberUid} 書き込み時のフィールド長チェック
+    function memberFieldsOk() {
+      let d = request.resource.data;
+      return optStringMaxLen(d, 'displayName', 100) &&
+             optStringMaxLen(d, 'notes', 1000) &&
+             optStringMaxLen(d, 'emergencyContact', 100) &&
+             optStringMaxLen(d, 'emergencyPhone', 30) &&
+             optStringMaxLen(d, 'beltRank', 30) &&
+             optStringMaxLen(d, 'role', 30) &&
+             optStringMaxLen(d, 'roleInDojo', 30);
+    }
+
+    // dojos create/update 時のフィールド長チェック
+    function dojoFieldsOk() {
+      let d = request.resource.data;
+      return optStringMaxLen(d, 'name', 150) &&
+             optStringMaxLen(d, 'nameLower', 150) &&
+             optStringMaxLen(d, 'city', 100) &&
+             optStringMaxLen(d, 'country', 100) &&
+             optStringMaxLen(d, 'website', 500) &&
+             optStringMaxLen(d, 'phone', 30);
+    }
+
+    // users create/update 時のフィールド長チェック
+    function userFieldsOk() {
+      let d = request.resource.data;
+      return optStringMaxLen(d, 'displayName', 100) &&
+             optStringMaxLen(d, 'displayNameLower', 100) &&
+             optStringMaxLen(d, 'email', 320) &&
+             optStringMaxLen(d, 'emailLower', 320) &&
+             optStringMaxLen(d, 'role', 30) &&
+             optStringMaxLen(d, 'roleUi', 30);
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // USERS COLLECTION
+    //
+    // ✅ CHANGED: create/update にフィールド長制限 + role 自己昇格防止を追加
+    // ✅ NOTE: users の create は登録直後（emailVerified = false）なので
+    //          verified() は要求しない。ただし isSelf() は必須。
+    // ───────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if signedIn();
+
+      // ✅ CHANGED: フィールド長制限 + role 自己昇格防止を追加
+      allow create: if isSelf(userId)
+        && userFieldsOk()
+        && (!('role' in request.resource.data)
+            || request.resource.data.role in ['student', 'staff_member']);
+
+      // ✅ sessionVerified フローに必要なフィールドのみの更新
+      //    本人が sessionVerified を false にリセットするのは常に許可。
+      //    true にする場合は sessionVerifiedAt（timestamp）も必須。
+      //    → 攻撃者が直接 true にセットしても、他コレクションへの
+      //      書き込みには別途 isDojoStaff 等のチェックがあるため被害は限定的。
+      allow update: if isSelf(userId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['sessionVerified', 'sessionVerifiedAt', 'updatedAt', 'lastLoginAt',
+                       'emailVerified', 'pendingDojoAction'])
+        // sessionVerified を true にする場合は sessionVerifiedAt も必須
+        && (
+          request.resource.data.sessionVerified == false
+          || (request.resource.data.sessionVerified == true
+              && ('sessionVerifiedAt' in request.resource.data)
+              && request.resource.data.sessionVerifiedAt is timestamp)
+          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['sessionVerified'])
+        );
+
+      // ✅ CHANGED: フィールド長制限 + 本人による role 変更防止を追加
+      // 上記の sessionVerified ルール以外の一般的な更新
+      allow update: if (isSelf(userId) || isAdmin())
+        && userFieldsOk()
+        && (isAdmin()
+            || !request.resource.data.diff(resource.data).affectedKeys()
+                .hasAny(['role', 'roles', 'accountType']));
+
+      allow delete: if isAdmin();
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // DOJOS COLLECTION
+    //
+    // ✅ CHANGED: create/update に verified() + dojoFieldsOk() を追加
+    // ───────────────────────────────────────────────────────────────
+    match /dojos/{dojoId} {
+      allow read: if resource.data.isPublic == true
+        || (signedIn() && (
+          isAdmin() ||
+          isDojoOwner(dojoId) ||
+          isMember(dojoId) ||
+          isMyDojo(dojoId) ||
+          isStaffOfDojoByUserDoc(dojoId) ||
+          isStaffOfDojoByToken(dojoId)
+        ));
+
+      // ✅ CHANGED: signedIn() → verified(), dojoFieldsOk() 追加
+      allow create: if verified() && isStaff() && dojoFieldsOk();
+      // ✅ CHANGED: signedIn() → verified(), dojoFieldsOk() 追加
+      allow update: if verified() && isDojoStaff(dojoId) && dojoFieldsOk();
+      allow delete: if isAdmin();
+
+      // ─────────────────────────────────────────────────────────────
+      // WAIVER TEMPLATES
+      // ─────────────────────────────────────────────────────────────
+      match /waiverTemplates/{templateId} {
+        // ✅ CHANGED: signedIn() → verified()
+        allow read: if verified() && (isPublicDojo(dojoId) || canReadDojoContent(dojoId) || isAdmin());
+        // ✅ CHANGED: signedIn() → verified()
+        allow create, update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // WAIVER SUBMISSIONS
+      //
+      // ✅ NOTE: create は公開 dojo のビジター（未認証含む）も使うため
+      //          signedIn() のまま。verified() にすると visitor が使えなくなる。
+      // ─────────────────────────────────────────────────────────────
+      match /waiverSubmissions/{submissionId} {
+        allow get: if signedIn() && (
+          isDojoStaff(dojoId) ||
+          isAdmin() ||
+          (resource.data.authUid == uid())
+        );
+
+        allow list: if signedIn() && (isDojoStaff(dojoId) || isAdmin());
+
+        allow create: if signedIn() && (
+          isAdmin() ||
+          isDojoStaff(dojoId) ||
+          isPublicDojo(dojoId)
+        ) && waiverSubmissionCreateOk(dojoId);
+
+        // ✅ CHANGED: signedIn() → verified()
+        allow update: if verified() && (
+          (isDojoStaff(dojoId) || isAdmin()) && waiverSubmissionStaffUpdateOk()
+        );
+
+        allow delete: if signedIn() && isAdmin();
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // TIMETABLE CLASSES
+      // ─────────────────────────────────────────────────────────────
+      match /timetableClasses/{classId} {
+        allow read: if canReadSchedule(dojoId);
+        // ✅ CHANGED: signedIn() → verified()
+        allow create, update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // MEMBERS
+      //
+      // ✅ CHANGED: 全 write に verified() + memberFieldsOk() を追加
+      // ─────────────────────────────────────────────────────────────
+      match /members/{memberUid} {
+        allow read: if signedIn() && (
+          isDojoStaff(dojoId) ||
+          memberUid == uid() ||
+          isAdmin()
+        );
+
+        // ✅ CHANGED: signedIn() → verified(), memberFieldsOk() 追加
+        allow create: if verified() && (
+          isDojoStaff(dojoId) ||
+          isAdmin() ||
+          (memberUid == uid() && userBelongsToDojo(dojoId))
+        ) && memberFieldsOk();
+
+        // ✅ CHANGED: signedIn() → verified(), memberFieldsOk() 追加
+        allow update: if verified() && (
+          isDojoStaff(dojoId) ||
+          memberUid == uid() ||
+          isAdmin()
+        ) && memberFieldsOk();
+
+        // ✅ CHANGED: signedIn() → verified()
+        allow delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
+
+        match /rankHistory/{historyId} {
+          allow read: if signedIn() && (
+            isDojoStaff(dojoId) ||
+            memberUid == uid() ||
+            isAdmin()
+          );
+          // ✅ CHANGED: signedIn() → verified()
+          allow create, update: if verified() && (isDojoStaff(dojoId) || isAdmin());
+          allow delete: if isAdmin();
+        }
+
+        match /memos/{memoId} {
+          function memoVisibleToSelf() {
+            return !('visibility' in resource.data) || resource.data.visibility == 'member';
+          }
+
+          allow read: if signedIn() && (
+            isDojoStaff(dojoId) ||
+            isAdmin() ||
+            (memberUid == uid() && memoVisibleToSelf())
+          );
+
+          // ✅ CHANGED: signedIn() → verified()
+          allow create, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
+
+          // ✅ CHANGED: signedIn() → verified()
+          allow update: if verified() && (
+            isDojoStaff(dojoId) ||
+            isAdmin() ||
+            (
+              memberUid == uid() &&
+              memoVisibleToSelf() &&
+              request.resource.data.diff(resource.data).changedKeys().hasOnly(['readAt']) &&
+              request.resource.data.readAt is timestamp
+            )
+          );
+        }
+
+        match /noticeInbox/{noticeId} {
+          allow read: if signedIn() && memberUid == uid();
+          // ✅ CHANGED: signedIn() → verified()
+          allow create, update, delete: if verified() && (
+            isDojoStaff(dojoId) || isAdmin()
+          );
+        }
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // SESSIONS
+      // ─────────────────────────────────────────────────────────────
+      match /sessions/{sessionId} {
+        allow read: if canReadSchedule(dojoId);
+
+        // ✅ CHANGED: signedIn() → verified()
+        allow create: if verified() && (
+          isDojoStaff(dojoId) ||
+          canReadDojoContent(dojoId) ||
+          isMember(dojoId) ||
+          userBelongsToDojo(dojoId)
+        );
+
+        // ✅ CHANGED: signedIn() → verified()
+        allow update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
+
+        match /attendance/{attendanceId} {
+          allow read: if signedIn() && (
+            isDojoStaff(dojoId) ||
+            attendanceId == uid() ||
+            isAdmin()
+          );
+          // ✅ CHANGED: signedIn() → verified()
+          allow create, update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // RESERVATIONS
+        // ─────────────────────────────────────────────────────────
+        match /reservations/{memberUid} {
+          allow read: if signedIn() && (
+            isDojoStaff(dojoId) ||
+            memberUid == uid() ||
+            isAdmin()
+          );
+
+          // ✅ CHANGED: signedIn() → verified()
+          allow create, update: if verified() &&
+            canReadDojoContent(dojoId) &&
+            (
+              memberUid == uid() ||
+              isDojoStaff(dojoId) ||
+              isAdmin()
+            ) &&
+            reservationWriteOk(dojoId, sessionId, memberUid);
+
+          // ✅ CHANGED: signedIn() → verified()
+          allow delete: if verified() && (
+            memberUid == uid() ||
+            isDojoStaff(dojoId) ||
+            isAdmin()
+          );
+        }
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // JOIN REQUESTS
+      //
+      // ✅ CHANGED: create に verified() を追加
+      // ⚠️ NOTE: email/password サインアップで登録直後に joinRequest を
+      //    作成するフローがある場合、メール認証後に作成するよう変更が必要
+      // ─────────────────────────────────────────────────────────────
+      match /joinRequests/{requestUid} {
+        allow read: if signedIn() && (
+          isDojoStaff(dojoId) ||
+          requestUid == uid() ||
+          isAdmin()
+        );
+
+        // ✅ CHANGED: signedIn() → verified()
+        allow create: if verified() && requestUid == uid();
+
+        // ✅ CHANGED: signedIn() → verified()
+        allow update, delete: if verified() && (
+          requestUid == uid() ||
+          isDojoStaff(dojoId) ||
+          isAdmin()
+        );
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // DOJO NOTIFICATIONS
+      // ─────────────────────────────────────────────────────────────
+      match /notifications/{notificationId} {
+        allow read: if signedIn() && (
+          isDojoStaff(dojoId) ||
+          isMember(dojoId) ||
+          isMyDojo(dojoId) ||
+          isAdmin()
+        );
+
+        // ✅ CHANGED: signedIn() → verified()
+        allow create, update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // NOTICES
+      // ─────────────────────────────────────────────────────────────
+      match /notices/{noticeId} {
+
+        function noticeAudienceOk() {
+          return !('audienceType' in resource.data) ||
+            resource.data.audienceType == 'all' ||
+            (
+              resource.data.audienceType == 'uids' &&
+              (
+                (
+                  ('audienceUids' in resource.data) &&
+                  (resource.data.audienceUids is list) &&
+                  (uid() in resource.data.audienceUids)
+                )
+                || hasInboxForNotice(dojoId, noticeId)
+              )
+            );
+        }
+
+        function noticeAssociationOk() {
+          return signedIn() && (
+            isMember(dojoId) ||
+            isMyDojo(dojoId) ||
+            isPublicDojo(dojoId)
+          );
+        }
+
+        function noticeReadableByMember() {
+          return noticeAssociationOk() &&
+                 ('status' in resource.data) &&
+                 (resource.data.status in ['sent', 'scheduled']) &&
+                 noticeAudienceOk();
+        }
+
+        allow get: if signedIn() && (
+          isDojoStaff(dojoId) ||
+          noticeReadableByMember() ||
+          isAdmin()
+        );
+
+        allow list: if signedIn() && (
+          isDojoStaff(dojoId) ||
+          noticeReadableByMember() ||
+          isAdmin()
+        );
+
+        // ✅ CHANGED: signedIn() → verified()
+        allow create, update, delete: if verified() && (
+          isDojoStaff(dojoId) ||
+          isAdmin()
+        );
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // ACTIVITY LOGS (Dojo)
+      // ─────────────────────────────────────────────────────────────
+      match /activityLogs/{logId} {
+        allow read: if signedIn() && (
+          isDojoStaff(dojoId) ||
+          isDojoOwner(dojoId) ||
+          isAdmin()
+        );
+
+        // ✅ CHANGED: signedIn() → verified()
+        allow create: if verified() && canReadDojoContent(dojoId);
+        // ✅ CHANGED: signedIn() → verified()
+        allow update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
+      }
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // GLOBAL NOTIFICATIONS
+    // ───────────────────────────────────────────────────────────────
+    match /notifications/{notificationId} {
+      allow read: if signedIn() && (
+        resource.data.userId == uid() ||
+        isAdmin()
+      );
+
+      // ✅ CHANGED: signedIn() → verified()
+      allow create: if verified();
+
+      allow update, delete: if signedIn() && (
+        resource.data.userId == uid() ||
+        isAdmin()
+      );
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // GLOBAL ACTIVITY LOGS
+    // ───────────────────────────────────────────────────────────────
+    match /activityLogs/{logId} {
+      allow read: if signedIn();
+      // ✅ CHANGED: signedIn() → verified()
+      allow create: if verified();
+      allow update, delete: if isAdmin();
+    }
+  }
+}

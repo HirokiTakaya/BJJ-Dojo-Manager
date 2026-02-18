@@ -1,493 +1,234 @@
+// app/verify/page.tsx
+//
+// 毎回ログイン時のメール認証ページ。
+//
+// フロー:
+//   1. ログイン → navigateAfterAuth() → Go API /v1/auth/reset-email-verified で
+//      emailVerified=false にリセット → /verify へリダイレクト
+//   2. /verify → sendEmailVerification() でメール送信
+//   3. ユーザーがどのデバイスでもリンクをクリック → Firebase Auth が emailVerified=true に
+//   4. このページで user.reload() をポーリング → emailVerified==true を検知
+//   5. sessionVerified=true にして /verify/success → /home
+
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { auth } from "@/firebase";
-import { sendEmailVerification, type ActionCodeSettings, type User } from "firebase/auth";
+import {
+  sendEmailVerification,
+  onAuthStateChanged,
+  signOut,
+  type User,
+} from "firebase/auth";
+import { authNullable, dbNullable } from "@/firebase";
+import { markSessionVerified } from "@/lib/sessionVerification";
 
-// ─────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────
-const POLL_MS = 3000;
-const COOLDOWN_MS = 60_000;
-const MAX_RESEND_ATTEMPTS = 5;
 const LOGO_SRC = "/assets/jiujitsu-samurai-Logo.png";
+const COOLDOWN_SECONDS = 60;
+const POLL_INTERVAL_MS = 2000;
+const MAX_POLL_ATTEMPTS = 300; // 10 minutes
+
+const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
+  <div className={`rounded-3xl border border-slate-200 bg-white shadow-sm ${className}`}>{children}</div>
+);
+const Alert = ({ kind, children }: { kind: "error" | "success" | "info"; children: React.ReactNode }) => {
+  const cls = kind === "error" ? "border-rose-200 bg-rose-50 text-rose-800" : kind === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-50 text-slate-700";
+  return <div className={`rounded-2xl border px-4 py-3 text-sm ${cls}`}>{children}</div>;
+};
 
 export default function VerifyPage() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(auth.currentUser);
-
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [toast, setToast] = useState("");
-  const [toastType, setToastType] = useState<"success" | "error" | "info">("info");
-  const [cooldown, setCooldown] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(COOLDOWN_MS / 1000);
-  const [resendCount, setResendCount] = useState(0);
-  const [isOnline, setIsOnline] = useState(true);
-
-  const cdTimer = useRef<number | null>(null);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+  const [polling, setPolling] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const hasSentAuto = useRef(false);
+  const autoSentRef = useRef(false);
 
-  const ACTION_CODE_SETTINGS: ActionCodeSettings = {
-    url: `${typeof window !== "undefined" ? window.location.origin : ""}/verify/success`,
-    handleCodeInApp: false,
-  };
-
-  // ─────────────────────────────────────────────
-  // Online/Offline detection
-  // ─────────────────────────────────────────────
+  // Cooldown timer
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      showToast("Back online", "success");
-    };
-    const handleOffline = () => {
-      setIsOnline(false);
-      showToast("You are offline. Verification may not work.", "error");
-    };
+    if (cooldown <= 0) return;
+    const t = setInterval(() => setCooldown(c => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
 
-    if (typeof window !== "undefined") {
-      setIsOnline(navigator.onLine);
-      window.addEventListener("online", handleOnline);
-      window.addEventListener("offline", handleOffline);
-      return () => {
-        window.removeEventListener("online", handleOnline);
-        window.removeEventListener("offline", handleOffline);
-      };
-    }
-  }, []);
-
-  // ─────────────────────────────────────────────
-  // Auth state listener
-  // ─────────────────────────────────────────────
+  // Auth state
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((u) => {
+    if (!authNullable) return;
+    const unsub = onAuthStateChanged(authNullable, u => {
+      if (!u) { router.replace("/login"); return; }
       setUser(u);
-      // If user becomes verified, redirect
-      if (u?.emailVerified) {
-        router.replace("/verify/success");
-      }
+      setLoading(false);
     });
-    return () => unsubscribe();
+    return () => unsub();
   }, [router]);
 
-  // ─────────────────────────────────────────────
-  // Toast helper
-  // ─────────────────────────────────────────────
-  const showToast = useCallback(
-    (message: string, type: "success" | "error" | "info" = "info") => {
-      setToast(message);
-      setToastType(type);
-    },
-    []
-  );
-
-  // ─────────────────────────────────────────────
-  // Cooldown timer
-  // ─────────────────────────────────────────────
-  const startCooldown = useCallback(() => {
-    setCooldown(true);
-    setSecondsLeft(COOLDOWN_MS / 1000);
-
-    if (cdTimer.current) window.clearInterval(cdTimer.current);
-
-    cdTimer.current = window.setInterval(() => {
-      setSecondsLeft((s) => {
-        if (s <= 1) {
-          if (cdTimer.current) window.clearInterval(cdTimer.current);
-          setCooldown(false);
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-  }, []);
-
-  // ─────────────────────────────────────────────
-  // Auto-send verification email on mount
-  // ─────────────────────────────────────────────
+  // Cleanup polling on unmount
   useEffect(() => {
-    (async () => {
-      if (!user || user.emailVerified || !user.email || hasSentAuto.current) return;
-      hasSentAuto.current = true;
-
-      try {
-        await user.reload();
-
-        // Check again after reload
-        if (user.emailVerified) {
-          router.replace("/verify/success");
-          return;
-        }
-
-        await sendEmailVerification(user, ACTION_CODE_SETTINGS);
-        showToast("Verification email sent to " + user.email, "success");
-        setResendCount((c) => c + 1);
-        startCooldown();
-      } catch (err: unknown) {
-        const message =
-          err instanceof Error ? err.message : "Failed to send verification email.";
-        showToast(message, "error");
-      }
-    })();
-  }, [user, router, startCooldown, showToast, ACTION_CODE_SETTINGS]);
-
-  // ─────────────────────────────────────────────
-  // Poll for email verification
-  // ─────────────────────────────────────────────
-  useEffect(() => {
-    if (!user) return;
-    if (pollRef.current) clearInterval(pollRef.current);
-
-    pollRef.current = setInterval(async () => {
-      try {
-        await user.reload();
-        if (user.emailVerified) {
-          if (pollRef.current) clearInterval(pollRef.current);
-          showToast("Email verified!", "success");
-          setTimeout(() => {
-            router.replace("/verify/success");
-          }, 500);
-        }
-      } catch {
-        // Ignore reload errors during polling
-      }
-    }, POLL_MS);
-
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [user, router, showToast]);
+  }, []);
 
-  // ─────────────────────────────────────────────
-  // Resend handler
-  // ─────────────────────────────────────────────
-  const handleResend = useCallback(async () => {
-    if (!user || sending || cooldown || user.emailVerified) return;
+  // ─────────────────────────────────────────
+  // Polling: check emailVerified
+  // ─────────────────────────────────────────
+  const startPolling = useCallback(() => {
+    if (pollRef.current) return; // already polling
+    setPolling(true);
+    let attempts = 0;
 
-    if (!isOnline) {
-      showToast("Cannot send email while offline.", "error");
-      return;
-    }
-
-    if (resendCount >= MAX_RESEND_ATTEMPTS) {
-      showToast(
-        "Maximum resend attempts reached. Please wait a few minutes or contact support.",
-        "error"
-      );
-      return;
-    }
-
-    setSending(true);
-    try {
-      await user.reload();
-
-      if (user.emailVerified) {
-        router.replace("/verify/success");
+    pollRef.current = setInterval(async () => {
+      attempts++;
+      if (attempts > MAX_POLL_ATTEMPTS) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = null;
+        setPolling(false);
+        setError("Verification timed out. Please resend the email.");
         return;
       }
 
-      await sendEmailVerification(user, ACTION_CODE_SETTINGS);
-      showToast("Verification email sent!", "success");
-      setResendCount((c) => c + 1);
-      startCooldown();
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to send verification email.";
+      try {
+        const u = authNullable?.currentUser;
+        if (!u) return;
 
-      // Handle specific Firebase errors
-      if (message.includes("too-many-requests")) {
-        showToast(
-          "Too many requests. Please wait a few minutes before trying again.",
-          "error"
-        );
-      } else {
-        showToast(message, "error");
+        await u.reload();
+        const refreshed = authNullable?.currentUser;
+
+        if (refreshed?.emailVerified) {
+          // ✅ Email verified!
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setPolling(false);
+
+          // Force token refresh so Firestore rules see updated emailVerified
+          await refreshed.getIdToken(true);
+
+          // Mark session as verified in Firestore
+          if (dbNullable) {
+            await markSessionVerified(dbNullable, refreshed.uid);
+          }
+
+          setSuccess("Email verified! Redirecting...");
+          setTimeout(() => router.replace("/verify/success"), 1000);
+        }
+      } catch (err) {
+        console.error("[Verify] Polling error:", err);
       }
-    } finally {
-      setSending(false);
-    }
-  }, [
-    user,
-    sending,
-    cooldown,
-    isOnline,
-    resendCount,
-    router,
-    startCooldown,
-    showToast,
-    ACTION_CODE_SETTINGS,
-  ]);
-
-  // ─────────────────────────────────────────────
-  // Check verification manually
-  // ─────────────────────────────────────────────
-  const checkVerification = useCallback(async () => {
-    if (!user) return;
-
-    try {
-      await user.reload();
-      if (user.emailVerified) {
-        showToast("Email verified!", "success");
-        router.replace("/verify/success");
-      } else {
-        showToast("Not verified yet. Please check your email.", "info");
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to check status.";
-      showToast(message, "error");
-    }
-  }, [user, router, showToast]);
-
-  // ─────────────────────────────────────────────
-  // Sign out and go to login
-  // ─────────────────────────────────────────────
-  const handleSignOut = useCallback(async () => {
-    try {
-      await auth.signOut();
-      router.replace("/login");
-    } catch {
-      router.replace("/login");
-    }
+    }, POLL_INTERVAL_MS);
   }, [router]);
 
-  // ─────────────────────────────────────────────
-  // Not signed in state
-  // ─────────────────────────────────────────────
-  if (!user) {
-    return (
-      <main
-        style={{
-          minHeight: "100vh",
-          background: "#0b1b22",
-          color: "white",
-          padding: 24,
-        }}
-      >
-        <div style={{ textAlign: "center", paddingTop: 60 }}>
-          <img
-            src={LOGO_SRC}
-            alt="Logo"
-            style={{
-              width: 64,
-              height: 64,
-              display: "block",
-              margin: "0 auto 24px",
-            }}
-          />
-          <h2 style={{ marginBottom: 12 }}>Not Signed In</h2>
-          <p style={{ opacity: 0.8, marginBottom: 20 }}>
-            Please sign in to verify your email.
-          </p>
-          <button
-            onClick={() => router.replace("/login")}
-            style={{
-              background: "transparent",
-              border: "1px solid rgba(255,255,255,0.35)",
-              color: "white",
-              borderRadius: 999,
-              height: 44,
-              padding: "0 24px",
-              cursor: "pointer",
-              fontWeight: 600,
-            }}
-          >
-            Go to Login
-          </button>
-        </div>
-      </main>
-    );
-  }
+  // ─────────────────────────────────────────
+  // Send verification email
+  // ─────────────────────────────────────────
+  const sendVerification = useCallback(async () => {
+    if (!user || !authNullable || sending || cooldown > 0) return;
+    setSending(true); setError(""); setSuccess("");
+    try {
+      console.log("[Verify] Sending verification email...");
+      await sendEmailVerification(user);
+      console.log("[Verify] Verification email sent");
+      setSent(true);
+      setCooldown(COOLDOWN_SECONDS);
+      setSuccess(`Verification email sent to ${user.email}`);
 
-  // ─────────────────────────────────────────────
-  // Main render
-  // ─────────────────────────────────────────────
+      // Start polling for emailVerified
+      startPolling();
+    } catch (err: any) {
+      console.error("[Verify] sendEmailVerification error:", err?.code, err?.message);
+      if (err?.code === "auth/too-many-requests") {
+        setError("Too many requests. Please wait a few minutes.");
+        setCooldown(COOLDOWN_SECONDS * 2);
+        // Still start polling - email may have been sent before
+        startPolling();
+      } else {
+        setError(err?.message || "Failed to send verification email.");
+      }
+    } finally { setSending(false); }
+  }, [user, sending, cooldown, startPolling]);
+
+  // Auto-send on first load
+  useEffect(() => {
+    if (autoSentRef.current || !user || loading) return;
+    autoSentRef.current = true;
+    sendVerification();
+  }, [user, loading, sendVerification]);
+
+  // ─────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────
+  if (loading) return (
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col items-center justify-center p-6">
+      <div className="w-full max-w-md text-center space-y-4">
+        <img src={LOGO_SRC} alt="Logo" className="w-16 h-16 mx-auto rounded-2xl shadow-lg" />
+        <div className="flex items-center justify-center gap-2 text-slate-500">
+          <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+          <span>Loading...</span>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "#0b1b22",
-        color: "white",
-        padding: 24,
-      }}
-    >
-      <div
-        style={{ maxWidth: 520, margin: "0 auto", paddingTop: 30, textAlign: "center" }}
-      >
-        <img
-          src={LOGO_SRC}
-          alt="Logo"
-          style={{ width: 64, height: 64, display: "block", margin: "0 auto 14px" }}
-        />
-
-        <h1 style={{ marginBottom: 10 }}>Verify Your Email Address</h1>
-
-        {/* Email display */}
-        <div
-          style={{
-            background: "rgba(255,255,255,0.1)",
-            borderRadius: 12,
-            padding: 12,
-            marginBottom: 16,
-          }}
-        >
-          <div style={{ fontSize: 12, opacity: 0.7 }}>Verification email sent to:</div>
-          <div style={{ fontWeight: 600, fontSize: 16 }}>{user.email}</div>
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col items-center justify-center p-6">
+      <div className="w-full max-w-md space-y-6">
+        <div className="text-center">
+          <img src={LOGO_SRC} alt="Logo" className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-lg" />
+          <h1 className="text-2xl font-bold text-slate-900">Verify Your Identity</h1>
+          <p className="mt-2 text-slate-500">For security, please verify your email each time you log in.</p>
         </div>
 
-        <p style={{ opacity: 0.9, marginBottom: 20 }}>
-          Check your email and click the link to activate your account.
-        </p>
+        {error && <Alert kind="error">❌ {error}</Alert>}
+        {success && <Alert kind="success">✅ {success}</Alert>}
 
-        {/* Offline warning */}
-        {!isOnline && (
-          <div
-            style={{
-              background: "#fef3c7",
-              color: "#92400e",
-              padding: 12,
-              borderRadius: 12,
-              marginBottom: 16,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-            }}
-          >
-            <span>⚠️</span>
-            <span>You are offline</span>
+        <Card><div className="px-5 py-6 sm:px-6 sm:py-8 space-y-4">
+          <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 text-center">
+            <div className="text-xs text-slate-500 mb-1">Verification email {sent ? "sent" : "will be sent"} to</div>
+            <div className="font-semibold text-slate-900">{user?.email || "..."}</div>
           </div>
-        )}
 
-        {/* Instructions */}
-        <div
-          style={{
-            background: "rgba(255,255,255,0.05)",
-            borderRadius: 12,
-            padding: 16,
-            marginBottom: 20,
-            textAlign: "left",
-          }}
-        >
-          <h3 style={{ margin: 0, marginBottom: 12, fontSize: 14 }}>
-            Didn't receive the email?
-          </h3>
-          <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, opacity: 0.9 }}>
-            <li style={{ marginBottom: 6 }}>Check your spam/junk folder</li>
-            <li style={{ marginBottom: 6 }}>
-              Make sure {user.email} is correct
-            </li>
-            <li style={{ marginBottom: 6 }}>Wait a few minutes for delivery</li>
-            <li>Click "Resend Email" below if needed</li>
-          </ul>
-        </div>
+          <div className="space-y-3 text-sm text-slate-600">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-bold">1</div>
+              <span>Check your email inbox (and spam folder)</span>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-bold">2</div>
+              <span>Click the verification link (works on any device)</span>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-bold">3</div>
+              <span>This page will automatically detect and redirect you</span>
+            </div>
+          </div>
 
-        {/* Action buttons */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {/* Resend button */}
-          <button
-            onClick={handleResend}
-            disabled={sending || cooldown || user.emailVerified || !isOnline}
-            style={{
-              width: "100%",
-              maxWidth: 360,
-              height: 44,
-              borderRadius: 999,
-              border: "1px solid rgba(255,255,255,0.35)",
-              background:
-                sending || cooldown || !isOnline ? "transparent" : "rgba(37, 99, 235, 0.3)",
-              color: "white",
-              cursor:
-                sending || cooldown || !isOnline ? "not-allowed" : "pointer",
-              fontWeight: 600,
-              margin: "0 auto",
-              opacity: sending || cooldown || !isOnline ? 0.6 : 1,
-            }}
-          >
-            {sending
-              ? "Sending…"
-              : cooldown
-                ? `Resend in ${secondsLeft}s`
-                : `Resend Email${resendCount > 0 ? ` (${resendCount}/${MAX_RESEND_ATTEMPTS})` : ""}`}
+          {polling && (
+            <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+              <span>Waiting for verification...</span>
+            </div>
+          )}
+
+          <button onClick={sendVerification} disabled={sending || cooldown > 0}
+            className="w-full rounded-full bg-slate-900 px-6 py-3 text-base font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed">
+            {sending ? "Sending..." : cooldown > 0 ? `Resend in ${cooldown}s` : sent ? "Resend Verification Email" : "Send Verification Email"}
           </button>
+        </div></Card>
 
-          {/* Check verification button */}
-          <button
-            onClick={checkVerification}
-            style={{
-              width: "100%",
-              maxWidth: 360,
-              height: 44,
-              borderRadius: 999,
-              border: "1px solid rgba(255,255,255,0.35)",
-              background: "transparent",
-              color: "white",
-              cursor: "pointer",
-              margin: "0 auto",
-            }}
-          >
-            I've Verified - Check Now
-          </button>
-
-          {/* Sign out link */}
-          <button
-            onClick={handleSignOut}
-            style={{
-              background: "transparent",
-              border: 0,
-              color: "#b2d3db",
-              cursor: "pointer",
-              marginTop: 8,
-              fontSize: 13,
-            }}
-          >
-            Use a different account
+        <div className="text-center">
+          <button onClick={async () => {
+            if (pollRef.current) clearInterval(pollRef.current);
+            try { if (authNullable) await signOut(authNullable); } catch {}
+            router.replace("/login");
+          }} className="text-sm text-slate-500 hover:text-slate-700 hover:underline">
+            Sign out and use a different account
           </button>
         </div>
       </div>
-
-      {/* Toast notification */}
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            left: 12,
-            right: 12,
-            bottom: 12,
-            padding: 12,
-            borderRadius: 12,
-            background:
-              toastType === "success"
-                ? "rgba(34, 197, 94, 0.9)"
-                : toastType === "error"
-                  ? "rgba(239, 68, 68, 0.9)"
-                  : "rgba(0, 0, 0, 0.8)",
-            color: "white",
-            zIndex: 1000,
-          }}
-        >
-          <div style={{ textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            {toastType === "success" && <span>✓</span>}
-            {toastType === "error" && <span>✕</span>}
-            {toast}
-          </div>
-          <div style={{ textAlign: "center", marginTop: 6 }}>
-            <button
-              onClick={() => setToast("")}
-              style={{
-                background: "transparent",
-                border: 0,
-                color: "rgba(255,255,255,0.8)",
-                cursor: "pointer",
-                fontSize: 13,
-              }}
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-    </main>
+    </div>
   );
 }

@@ -16,6 +16,7 @@ import (
 	"dojo-manager/backend/internal/domain/notifications"
 	"dojo-manager/backend/internal/domain/profile"
 	"dojo-manager/backend/internal/domain/ranks"
+	"dojo-manager/backend/internal/domain/retention"
 	"dojo-manager/backend/internal/domain/session"
 	"dojo-manager/backend/internal/domain/stats"
 	stripedom "dojo-manager/backend/internal/domain/stripe"
@@ -60,6 +61,7 @@ func main() {
 	notificationsSvc := notifications.NewService(fs.Client)
 	membersSvc := members.NewService(fs.Client, dojoRepo)
 	profileSvc := profile.NewService(fs.Client, authClient)
+	retentionSvc := retention.NewService(fs.Client, dojoRepo)
 
 	// Stripe service (optional - only if configured)
 	var stripeSvc *stripedom.Service
@@ -91,6 +93,7 @@ func main() {
 		MembersSvc:       membersSvc,
 		ProfileSvc:       profileSvc,
 		StripeSvc:        stripeSvc,
+		RetentionSvc:     retentionSvc,
 	})
 
 	srv := &http.Server{

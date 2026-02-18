@@ -1,3 +1,4 @@
+
 // src/app/dojos/members/[memberId]/page.tsx
 import { redirect } from "next/navigation";
 

@@ -11,8 +11,9 @@ import {
 } from "@/firebase";
 
 import { doc, setDoc } from "firebase/firestore";
+import { signInAnonymously } from "firebase/auth";
 
-type RoleKey = "student" | "staff";
+type RoleKey = "student" | "staff" | "visitor";
 
 type Props = {
   redirectBase?: string;
@@ -20,6 +21,9 @@ type Props = {
   loginPath?: string;
   studentProfilePath?: string;
   staffSignupPath?: string;
+
+  // ✅ 追加：ビジター導線の開始地点（道場選択ページなど）
+  visitorStartPath?: string; // default: "/visitor/select-dojo"
 };
 
 export default function ChooseAccountRole({
@@ -28,17 +32,24 @@ export default function ChooseAccountRole({
   loginPath = "/login",
   studentProfilePath = "/signup/student-profile",
   staffSignupPath = "/signup/staff",
+  visitorStartPath = "/visitor/select-dojo",
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
   const router = useRouter();
 
-  const toStoredRole = (role: RoleKey) =>
-    role === "staff" ? "staff_member" : "student";
+  const toStoredRole = (role: RoleKey) => {
+    if (role === "staff") return "staff_member";
+    if (role === "student") return "student";
+    return "visitor";
+  };
 
   const buildFinalDestination = (role: RoleKey) => {
     const isOnboarding = redirectBase.startsWith("/onboarding");
     if (isOnboarding) {
+      // visitor は onboarding ルートに入れない（想定）
+      if (role === "visitor") return visitorStartPath;
+
       return role === "staff"
         ? "/onboarding/role/staff/setup"
         : "/onboarding/role/student/setup";
@@ -56,6 +67,23 @@ export default function ChooseAccountRole({
     }
   };
 
+  const ensureGuestAuth = async () => {
+    // Firebase未設定なら何もしない
+    if (!firebaseEnabled) {
+      throw new Error(firebaseDisabledReason ?? "Firebase is disabled.");
+    }
+    if (!authNullable) {
+      throw new Error("Auth is not initialized.");
+    }
+
+    const current = authNullable.currentUser;
+    if (current) return current;
+
+    // ✅ “アカウント無し体験”の正体：匿名ログイン
+    const cred = await signInAnonymously(authNullable);
+    return cred.user;
+  };
+
   const handleSelect = async (role: RoleKey) => {
     if (busy) return;
     setBusy(true);
@@ -69,7 +97,41 @@ export default function ChooseAccountRole({
 
       const finalDestination = buildFinalDestination(role);
 
+      // ───────────────────────────────
+      // Visitor flow（アカウント不要→道場選択→Waiver）
+      // ───────────────────────────────
+      if (role === "visitor") {
+        // 1) 匿名ログイン（Firestore Rulesで書けるようにする）
+        await ensureGuestAuth();
+
+        // 2) 遷移（必要なら next を渡す）
+        const qs = new URLSearchParams();
+        qs.set("from", "signup");
+        // “署名後に戻す/進ませる”導線が欲しければ next を使う
+        qs.set("next", "/visitor/complete"); // 例：完了ページ
+        const target = `${visitorStartPath}?${qs.toString()}`;
+
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("pendingRole", "visitor");
+          sessionStorage.setItem("pendingNext", target);
+          sessionStorage.setItem("pendingStoredRole", toStoredRole("visitor"));
+        }
+
+        safeNavigate(target);
+
+        // Optional: onContinue callback（非同期・失敗しても止めない）
+        if (onContinue) {
+          void onContinue(role).catch((e) => {
+            console.warn("[ChooseAccountRole] onContinue failed (ignored)", e);
+          });
+        }
+
+        return;
+      }
+
+      // ───────────────────────────────
       // Student flow
+      // ───────────────────────────────
       if (role === "student") {
         const qs = new URLSearchParams();
         qs.set("next", finalDestination);
@@ -80,7 +142,9 @@ export default function ChooseAccountRole({
         return;
       }
 
+      // ───────────────────────────────
       // Staff flow
+      // ───────────────────────────────
       if (typeof window !== "undefined") {
         sessionStorage.setItem("pendingRole", "staff");
         sessionStorage.setItem("pendingNext", finalDestination);
@@ -129,7 +193,7 @@ export default function ChooseAccountRole({
     <div className="fixed inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-slate-50 to-white p-6">
       {/* Logo */}
       <img
-         src="/assets/jiujitsu-samurai-Logo.png"
+        src="/assets/jiujitsu-samurai-Logo.png"
         alt="Logo"
         className="w-20 h-20 mb-8 rounded-2xl shadow-lg"
       />
@@ -138,37 +202,58 @@ export default function ChooseAccountRole({
       <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-3 text-center">
         Who are you?
       </h1>
-      <p className="text-slate-500 mb-10 text-center">
-        Tap to select
-      </p>
+      <p className="text-slate-500 mb-10 text-center">Tap to select</p>
 
-      {/* Role Buttons - Side by Side */}
-      <div className="flex gap-4 w-full max-w-sm">
-        {/* Student */}
-        <button
-          onClick={() => handleSelect("student")}
-          disabled={busy}
-          className="flex-1 group rounded-3xl bg-white border-2 border-slate-200 p-5 transition-all hover:border-emerald-400 hover:shadow-lg active:scale-95 disabled:opacity-50"
-        >
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-14 h-14 rounded-2xl bg-emerald-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-              <span className="text-3xl">🥋</span>
+      {/* Role Buttons */}
+      <div className="w-full max-w-sm space-y-4">
+        {/* Student + Staff (row) */}
+        <div className="flex gap-4">
+          {/* Student */}
+          <button
+            onClick={() => handleSelect("student")}
+            disabled={busy}
+            className="flex-1 group rounded-3xl bg-white border-2 border-slate-200 p-5 transition-all hover:border-emerald-400 hover:shadow-lg active:scale-95 disabled:opacity-50"
+          >
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-14 h-14 rounded-2xl bg-emerald-100 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <span className="text-3xl">🥋</span>
+              </div>
+              <span className="text-lg font-bold text-slate-900">Student</span>
             </div>
-            <span className="text-lg font-bold text-slate-900">Student</span>
-          </div>
-        </button>
+          </button>
 
-        {/* Staff */}
-        <button
-          onClick={() => handleSelect("staff")}
-          disabled={busy}
-          className="flex-1 group rounded-3xl bg-white border-2 border-slate-200 p-5 transition-all hover:border-violet-400 hover:shadow-lg active:scale-95 disabled:opacity-50"
-        >
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-              <span className="text-3xl">🏢</span>
+          {/* Staff */}
+          <button
+            onClick={() => handleSelect("staff")}
+            disabled={busy}
+            className="flex-1 group rounded-3xl bg-white border-2 border-slate-200 p-5 transition-all hover:border-violet-400 hover:shadow-lg active:scale-95 disabled:opacity-50"
+          >
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <span className="text-3xl">🏢</span>
+              </div>
+              <span className="text-lg font-bold text-slate-900">Staff</span>
             </div>
-            <span className="text-lg font-bold text-slate-900">Staff</span>
+          </button>
+        </div>
+
+        {/* ✅ Visitor (full width) */}
+        <button
+          onClick={() => handleSelect("visitor")}
+          disabled={busy}
+          className="w-full group rounded-3xl bg-white border-2 border-slate-200 p-5 transition-all hover:border-sky-400 hover:shadow-lg active:scale-95 disabled:opacity-50"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-sky-100 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <span className="text-3xl">📝</span>
+              </div>
+              <div className="text-left">
+                <div className="text-lg font-bold text-slate-900">Visitor</div>
+                <div className="text-sm text-slate-500">Waiver (No account)</div>
+              </div>
+            </div>
+            <div className="text-slate-400 text-sm font-semibold">→</div>
           </div>
         </button>
       </div>
@@ -181,11 +266,7 @@ export default function ChooseAccountRole({
       )}
 
       {/* Loading indicator */}
-      {busy && (
-        <div className="mt-6 text-slate-500 text-sm">
-          Loading...
-        </div>
-      )}
+      {busy && <div className="mt-6 text-slate-500 text-sm">Loading...</div>}
 
       {/* Login Link */}
       <p className="mt-10 text-sm text-slate-500">

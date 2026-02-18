@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/providers/AuthProvider";
 import { auth, db } from "@/firebase";
 import { useDojoName } from "@/hooks/useDojoName";
+import { useWaiverStatus } from "@/hooks/useWaiverStatus";
 import { resolveDojoId, resolveIsStaff, type UserDocBase } from "@/lib/roles";
 import { doc, getDoc } from "firebase/firestore";
 
@@ -61,6 +62,12 @@ export default function HomePage() {
   const isStaff = useMemo(() => resolveIsStaff(userDoc), [userDoc]);
   const isStudent = useMemo(() => userDoc && !isStaff, [userDoc, isStaff]);
 
+  // ★ Waiver status check (students only)
+  const { loading: waiverLoading, signed: waiverSigned } = useWaiverStatus(
+    isStudent ? dojoId : null,
+    user?.uid
+  );
+
   // Navigation handlers
   const handleSignOut = useCallback(async () => {
     await auth.signOut();
@@ -94,6 +101,10 @@ export default function HomePage() {
   const gotoStudentSignup = useCallback(() => {
     router.push(`/signup/student?next=/home`);
   }, [router]);
+
+  const gotoWaiver = useCallback(() => {
+    if (dojoId) router.push(`/visitor/${dojoId}/waiver?next=/home`);
+  }, [router, dojoId]);
 
   // Loading state
   if (loading) {
@@ -152,6 +163,34 @@ export default function HomePage() {
             </button>
           </div>
         </div>
+
+        {/* ★ Waiver unsigned banner (students only) */}
+        {isStudent && dojoId && !waiverLoading && !waiverSigned && (
+          <button
+            onClick={gotoWaiver}
+            className="w-full mb-6 flex items-center gap-4 px-5 py-4 rounded-2xl border-2 border-amber-300 bg-amber-50 hover:bg-amber-100 hover:border-amber-400 transition text-left group"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-amber-200 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+              <span className="text-2xl">📝</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-amber-900">
+                Waiver not signed yet
+              </p>
+              <p className="text-sm text-amber-700 mt-0.5">
+                Please sign the liability waiver before joining class.
+              </p>
+            </div>
+            <svg
+              className="w-5 h-5 text-amber-500 group-hover:text-amber-700 group-hover:translate-x-0.5 transition flex-shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        )}
 
         {/* Profile loading/error */}
         {profileBusy && (

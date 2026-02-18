@@ -1,3 +1,4 @@
+
 // app/dojos/[dojoId]/settings/billing/checkout/page.tsx
 "use client";
 
