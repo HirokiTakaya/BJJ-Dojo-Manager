@@ -67,3 +67,29 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# ================================
+# ✅ Added: Desktop/Electron build artifacts (DO NOT COMMIT)
+# ================================
+desktop/dist/
+desktop/out/
+desktop/build/
+desktop/release/
+desktop/.webpack/
+desktop/.next/
+desktop/.cache/
+
+# macOS app bundles & archives
+*.app
+*.dmg
+*.pkg
+*.zip
+
+# Optional: common OS junk
+.DS_Store
+
+desktop/dist/
+desktop/out/
+*.app
+*.zip
+node_modules/
