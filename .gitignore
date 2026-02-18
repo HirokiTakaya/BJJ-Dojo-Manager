@@ -93,3 +93,17 @@ desktop/out/
 *.app
 *.zip
 node_modules/
+# Electron / Desktop build outputs
+desktop/dist/
+desktop/out/
+desktop/build/
+desktop/release/
+
+# Built installers / archives
+*.app
+*.dmg
+*.pkg
+*.zip
+
+# If you keep downloadable builds in repo, ignore them
+frontend/public/downloads/
