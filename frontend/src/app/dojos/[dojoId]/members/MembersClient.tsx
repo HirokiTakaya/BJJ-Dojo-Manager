@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+// ✅ FIX: Added missing imports for useRouter, useParams, useSearchParams
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useAuth } from "@/providers/AuthProvider";
 import Navigation, { BottomNavigation } from "@/components/Navigation";

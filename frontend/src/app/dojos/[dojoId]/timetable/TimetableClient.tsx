@@ -110,6 +110,18 @@ function isDateInPast(dk: string) {
   t.setHours(0, 0, 0, 0);
   return sd < t;
 }
+
+function buildSafeMemberName(name?: string | null, email?: string | null, uid?: string | null) {
+  const n = (name ?? "").trim();
+  if (n) return n;
+
+  const e = (email ?? "").trim();
+  if (e) return e;
+
+  const u = (uid ?? "").trim();
+  return u ? u.substring(0, 8) : "Member";
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 let __dbCache: any = null;
@@ -265,7 +277,6 @@ function parseSessionId(sessionId: string): { dateKey?: string; timetableClassId
 }
 
 async function touchTimetableMeta(db: any, dojoId: string, by?: string) {
-  // ✅ 生徒側でも監視しやすい場所に「更新フラグ」を書く（権限により失敗してもOK）
   const rootPatch = {
     timetableUpdatedAt: serverTimestamp(),
     timetableUpdatedBy: by || null,
@@ -277,16 +288,12 @@ async function touchTimetableMeta(db: any, dojoId: string, by?: string) {
   };
 
   const results = await Promise.allSettled([
-    // staff が書ける想定
     setDoc(doc(db, "dojos", dojoId), rootPatch, { merge: true }),
     setDoc(doc(db, "dojos", dojoId, "meta", "timetable"), metaPatch, { merge: true }),
-
-    // 生徒が read できる想定（検索にも使っている）
     setDoc(doc(db, "publicDojos", dojoId), rootPatch, { merge: true }),
     setDoc(doc(db, "publicDojos", dojoId, "meta", "timetable"), metaPatch, { merge: true }),
   ]);
 
-  // すべて失敗した場合だけログ（permission-denied などはよくある）
   if (results.every((r) => r.status === "rejected")) {
     console.warn("Failed to touch timetable meta (all writes rejected)");
   }
@@ -303,7 +310,6 @@ async function syncUpcomingSessionsForTimetableEdit(
 ): Promise<number> {
   const { dojoId, timetableClassId, prev, next } = args;
 
-  // ✅ 今日以降のみ（ローカルタイム 기준）
   const todayKey = toDateKey(startOfToday(new Date()));
 
   const snap = await getDocs(collection(db, "dojos", dojoId, "sessions"));
@@ -326,7 +332,6 @@ async function syncUpcomingSessionsForTimetableEdit(
     let dateKey = String(data.dateKey || "");
     let tcid = String(data.timetableClassId || "");
 
-    // timetableClassId / dateKey が無い古いデータでも、ID から推測する
     if (!dateKey || !tcid) {
       const parsed = parseSessionId(sid);
       if (!dateKey && parsed.dateKey) dateKey = parsed.dateKey;
@@ -336,10 +341,8 @@ async function syncUpcomingSessionsForTimetableEdit(
     if (!tcid || tcid !== timetableClassId) continue;
     if (!dateKey || dateKey < todayKey) continue;
 
-    // 手動上書きが明示されているものは触らない
     if (data.manualOverride === true) continue;
 
-    // ✅ まず「時間のフィールドだけ」同期できるか判定
     const timeOk =
       (data.weekday == null || Number(data.weekday) === Number(prev.weekday)) &&
       (data.startMinute == null || Number(data.startMinute) === Number(prev.startMinute)) &&
@@ -347,7 +350,6 @@ async function syncUpcomingSessionsForTimetableEdit(
 
     if (!timeOk) continue;
 
-    // ✅ タイトル/インストラクター/種別は、古い値と一致している時だけ更新（個別カスタムを壊さない）
     const titleOk = data.title == null || String(data.title) === String(prev.title);
     const instructorOk =
       data.instructor == null || String(data.instructor || "") === String(prev.instructor || "");
@@ -365,7 +367,6 @@ async function syncUpcomingSessionsForTimetableEdit(
     if (instructorOk) patch.instructor = next.instructor || null;
     if (classTypeOk) patch.classType = next.classType || "adult";
 
-    // 後方互換: 欠けてる場合は補完しておく
     if (data.timetableClassId == null) patch.timetableClassId = timetableClassId;
     if (data.dateKey == null && dateKey) patch.dateKey = dateKey;
 
@@ -373,7 +374,6 @@ async function syncUpcomingSessionsForTimetableEdit(
     ops += 1;
     updated += 1;
 
-    // Firestore batch は 500 操作まで
     if (ops >= 450) await commitIfNeeded();
   }
 
@@ -481,11 +481,9 @@ async function listTimetableFromFirestore(db: any, dojoId: string) {
 
 async function loadTimetableClassesUnified(dojoId: string, db: any) {
   try {
-    // ✅ 空配列でも「正常結果」として採用（0件はあり得る）
     const apiRows = await listTimetable(dojoId);
     return apiRows;
   } catch {
-    // ✅ API が落ちた/エラーのときだけ Firestore fallback
     if (db) {
       try {
         return await listTimetableFromFirestore(db, dojoId);
@@ -963,7 +961,7 @@ export default function TimetableClient() {
         setUserDoc(ud);
         setDojoId(did);
         setUserRole(resolveRole(ud));
-        setUserName(ud?.displayName || ud?.studentProfile?.fullName || ud?.email || "");
+        setUserName(buildSafeMemberName(ud?.displayName || ud?.studentProfile?.fullName || ud?.email, user.email, user.uid));
 
         if (did && !resolveIsStaff(ud) && !cancelled) {
           const registered = await ensureMemberRegistration(db, {
@@ -1082,10 +1080,31 @@ export default function TimetableClient() {
     };
   }, [dojoId, isStaff]);
 
+  // ✅ refreshWithRetry: API が古いデータを返す場合にリトライ + Firestore フォールバック
   const refresh = useCallback(async () => {
     if (!dojoId) return;
+
+    // 1回目: API から取得
+    const rows = await loadTimetableClassesUnified(dojoId, await waitForDb());
+    setClasses(rows);
+
+    // API 結果が最新でない可能性があるため、少し待ってからもう一度取得
+    // （onSnapshot 経由のリフレッシュと競合しないよう短い delay）
+    await sleep(300);
+
     const db = await waitForDb();
-    if (db) setClasses(await loadTimetableClassesUnified(dojoId, db));
+    if (db) {
+      try {
+        // Firestore から直接取得して、API の結果と比較・マージ
+        const firestoreRows = await listTimetableFromFirestore(db, dojoId);
+        if (firestoreRows.length > 0) {
+          // Firestore の結果を正とする（API より確実に最新）
+          setClasses(firestoreRows);
+        }
+      } catch {
+        // Firestore fallback も失敗した場合は API の結果をそのまま使う
+      }
+    }
   }, [dojoId]);
 
 
@@ -1101,6 +1120,7 @@ export default function TimetableClient() {
       if (timer) return;
       timer = setTimeout(async () => {
         timer = null;
+        if (cancelled) return;
         try {
           await refresh();
         } catch (e) {
@@ -1113,7 +1133,6 @@ export default function TimetableClient() {
       const db = await waitForDb();
       if (!db || cancelled) return;
 
-      // ✅ 生徒が read できる可能性が高い publicDojos を監視（最優先）
       const pubRef = doc(db, "publicDojos", dojoId);
       unsubs.push(
         onSnapshot(
@@ -1123,7 +1142,6 @@ export default function TimetableClient() {
         )
       );
 
-      // ✅ meta がある場合はそれも（permission-denied は無視でOK）
       const pubMetaRef = doc(db, "publicDojos", dojoId, "meta", "timetable");
       unsubs.push(
         onSnapshot(
@@ -1133,7 +1151,6 @@ export default function TimetableClient() {
         )
       );
 
-      // ✅ 既存: dojos 側（読めるユーザーだけでOK）
       const dojoRef = doc(db, "dojos", dojoId);
       unsubs.push(
         onSnapshot(
@@ -1152,7 +1169,6 @@ export default function TimetableClient() {
         )
       );
 
-      // 初回も一度リフレッシュ（snapshot 前に UI を合わせる）
       requestRefresh();
     })();
 
@@ -1188,21 +1204,16 @@ export default function TimetableClient() {
         const merged = new Map<string, Session>();
         for (const s of planned) merged.set(s.id, s);
 
-        // ✅ 現在の timetable(template) に存在する classId だけ有効
         const activeClassIds = new Set(classes.map((c) => c.id));
 
         const dbSessions = await loadSessionsFromFirestore(db, dojoId, startDK, endDK);
         for (const [sid, data] of dbSessions) {
-          // ✅ timetable で削除されたテンプレに紐づく session は生徒 UI から除外
           const parsed = parseSessionId(sid);
           const tcid = String((data as any).timetableClassId || parsed.timetableClassId || "");
           if (tcid && !activeClassIds.has(tcid)) continue;
 
           const prev = merged.get(sid);
 
-          // ✅ Timetable の変更を生徒側に反映させるため、
-          // manualOverride が true の session だけが timetable を上書きする。
-          // （prev が無い＝ad-hoc session の場合は session を採用）
           const useSession = (data as any).manualOverride === true || !prev;
 
           merged.set(sid, {
@@ -1329,18 +1340,27 @@ export default function TimetableClient() {
     setBusy(true);
     setErr("");
     setSuccessMsg("");
+
+    // ✅ Optimistic Update: ローカル state から即座に削除
+    const deletedId = deletingClass.id;
+    const deletedTitle = deletingClass.title;
+    setClasses((prev) => prev.filter((c) => c.id !== deletedId));
+
     try {
-      await deleteTimetableClass(dojoId, deletingClass.id);
+      await deleteTimetableClass(dojoId, deletedId);
       setDeleteConfirmOpen(false);
       setDeletingClass(null);
-      setSuccessMsg(`Deleted: ${deletingClass.title}`);
+      setSuccessMsg(`Deleted: ${deletedTitle}`);
 
       const db = await waitForDb();
       if (db) await touchTimetableMeta(db, dojoId, user?.uid);
 
-      await refresh();
+      // バックグラウンドでサーバーからも再取得（整合性確認）
+      refresh().catch(() => {});
     } catch (e: any) {
+      // ✅ 失敗時はロールバック
       setErr(e?.message || "Delete failed.");
+      await refresh();
     } finally {
       setBusy(false);
     }
@@ -1386,8 +1406,30 @@ export default function TimetableClient() {
       classType: editClassType || "adult",
     };
 
+    // ✅ Optimistic Update: ローカル state を即座に更新（API レスポンスを待たない）
+    const editedId = editingClass.id;
+    setClasses((prev) =>
+      prev.map((c) =>
+        c.id === editedId
+          ? {
+              ...c,
+              title: t,
+              weekday: editWeekday,
+              startMinute: hhmmToMinutes(editStartHHMM),
+              durationMinute: editDurationMin,
+              instructor: editInstructor || undefined,
+              classType: editClassType,
+            } as TimetableClass
+          : c
+      )
+    );
+
+    // モーダルを即座に閉じる（UIレスポンス向上）
+    setEditModalOpen(false);
+    setEditingClass(null);
+
     try {
-      await updateTimetableClass(dojoId, editingClass.id, {
+      await updateTimetableClass(dojoId, editedId, {
         title: t,
         weekday: editWeekday,
         startMinute: hhmmToMinutes(editStartHHMM),
@@ -1395,14 +1437,12 @@ export default function TimetableClient() {
         instructor: editInstructor || undefined,
         classType: editClassType,
       } as any);
-      setEditModalOpen(false);
-      setEditingClass(null);
 
       const db = await waitForDb();
       if (db) {
         const synced = await syncUpcomingSessionsForTimetableEdit(db, {
           dojoId,
-          timetableClassId: editingClass.id,
+          timetableClassId: editedId,
           prev: prevSnapshot,
           next: nextSnapshot,
         });
@@ -1418,14 +1458,18 @@ export default function TimetableClient() {
         setSuccessMsg(`Updated: ${t}`);
       }
 
-      await refresh();
+      // ✅ バックグラウンドでサーバーからも再取得して整合性を確認
+      refresh().catch(() => {});
     } catch (e: any) {
+      // ✅ API が失敗した場合はロールバック（サーバーから再取得）
       setErr(e?.message || "Update failed.");
+      await refresh();
     } finally {
       setBusy(false);
     }
   };
 
+  // ✅ FIX: classType を削除、instructor を || null に統一
   const onClickClassStaff = async (klass: WeeklyClassItem, dateKey: string) => {
     const db = await waitForDb();
     if (!db || !dojoId || !user) return;
@@ -1442,8 +1486,7 @@ export default function TimetableClient() {
         durationMinute: klass.durationMinute,
         dateKey,
         createdBy: user.uid,
-        instructor: klass.instructor,
-        classType: klass.classType,
+        instructor: klass.instructor || null,
       });
       router.push(`/dojos/${encodeURIComponent(dojoId)}/sessions/${encodeURIComponent(session.id)}`);
     } catch (e: any) {
@@ -1464,6 +1507,7 @@ export default function TimetableClient() {
     setModalOpen(true);
   };
 
+  // ✅ FIX: classType を削除、instructor を || null に統一
   const onModalCreate = async () => {
     const db = await waitForDb();
     if (!db || !dojoId || !user) return;
@@ -1500,8 +1544,7 @@ export default function TimetableClient() {
           durationMinute: modalDurationMin,
           dateKey: sessionDK,
           createdBy: user.uid,
-          instructor: modalInstructor || undefined,
-          classType: modalClassType,
+          instructor: modalInstructor || null,
         });
         created.push(sessionDK);
       }
@@ -1527,6 +1570,7 @@ export default function TimetableClient() {
     setReserveModalOpen(true);
   };
 
+  // ✅ FIX: classType を削除、as any を削除、instructor を || null に統一
   const makeReservation = async () => {
     const db = await waitForDb();
     if (!db || !dojoId || !user || !selectedSession) return;
@@ -1534,27 +1578,27 @@ export default function TimetableClient() {
     setErr("");
     setSuccessMsg("");
     try {
-      const sessionRef = doc(db, "dojos", dojoId, "sessions", selectedSession.id);
-      if (!(await getDoc(sessionRef)).exists())
-        await setDoc(sessionRef, {
-          dojoId,
-          timetableClassId: selectedSession.timetableClassId,
-          title: selectedSession.title,
-          dateKey: selectedSession.dateKey,
-          weekday: selectedSession.weekday,
-          startMinute: selectedSession.startMinute,
-          durationMinute: selectedSession.durationMinute,
-          instructor: selectedSession.instructor,
-          classType: selectedSession.classType,
-          createdAt: serverTimestamp(),
-          createdBy: user.uid,
-        });
+      const memberName = buildSafeMemberName(userName, user.email, user.uid);
 
-      await setDoc(doc(db, "dojos", dojoId, "sessions", selectedSession.id, "reservations", user.uid), {
+      const ensuredSession = await getOrCreateSession(db, {
         dojoId,
-        sessionId: selectedSession.id,
+        timetableClassId: selectedSession.timetableClassId,
+        title: selectedSession.title,
+        dateKey: selectedSession.dateKey,
+        weekday: selectedSession.weekday,
+        startMinute: selectedSession.startMinute,
+        durationMinute: selectedSession.durationMinute,
+        instructor: selectedSession.instructor || null,
+        createdBy: user.uid,
+      });
+
+      const ensuredSessionId = ensuredSession.id || selectedSession.id;
+
+      await setDoc(doc(db, "dojos", dojoId, "sessions", ensuredSessionId, "reservations", user.uid), {
+        dojoId,
+        sessionId: ensuredSessionId,
         memberId: user.uid,
-        memberName: userName,
+        memberName,
         status: "confirmed",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -1562,15 +1606,36 @@ export default function TimetableClient() {
 
       setMyReservations((prev) => {
         const m = new Map(prev);
-        m.set(selectedSession.id, {
+        m.set(ensuredSessionId, {
           dojoId,
-          sessionId: selectedSession.id,
+          sessionId: ensuredSessionId,
           memberId: user.uid,
-          memberName: userName,
+          memberName,
           status: "confirmed",
           createdAt: new Date(),
         });
         return m;
+      });
+
+      setSessions((prev) => {
+        const exists = prev.some((s) => s.id === ensuredSessionId);
+        if (exists) return prev;
+        return [
+          ...prev,
+          {
+            id: ensuredSessionId,
+            timetableClassId: selectedSession.timetableClassId,
+            title: selectedSession.title,
+            dateKey: selectedSession.dateKey,
+            weekday: selectedSession.weekday,
+            startMinute: selectedSession.startMinute,
+            durationMinute: selectedSession.durationMinute,
+            instructor: selectedSession.instructor ?? undefined,
+            classType: selectedSession.classType ?? "adult",
+          },
+        ].sort((a, b) =>
+          a.dateKey !== b.dateKey ? a.dateKey.localeCompare(b.dateKey) : a.startMinute - b.startMinute
+        );
       });
 
       setReserveModalOpen(false);

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -17,22 +18,22 @@ import (
 )
 
 type Config struct {
-	SecretKey             string
-	WebhookSecret         string
-	PriceProMonthly       string
-	PriceProYearly        string
-	PriceBusinessMonthly  string
-	PriceBusinessYearly   string
+	SecretKey            string
+	WebhookSecret        string
+	PriceProMonthly      string
+	PriceProYearly       string
+	PriceBusinessMonthly string
+	PriceBusinessYearly  string
 }
 
 func LoadConfig() Config {
 	return Config{
-		SecretKey:             os.Getenv("STRIPE_SECRET_KEY"),
-		WebhookSecret:         os.Getenv("STRIPE_WEBHOOK_SECRET"),
-		PriceProMonthly:       os.Getenv("STRIPE_PRICE_PRO_MONTHLY"),
-		PriceProYearly:        os.Getenv("STRIPE_PRICE_PRO_YEARLY"),
-		PriceBusinessMonthly:  os.Getenv("STRIPE_PRICE_BUSINESS_MONTHLY"),
-		PriceBusinessYearly:   os.Getenv("STRIPE_PRICE_BUSINESS_YEARLY"),
+		SecretKey:            os.Getenv("STRIPE_SECRET_KEY"),
+		WebhookSecret:        os.Getenv("STRIPE_WEBHOOK_SECRET"),
+		PriceProMonthly:      os.Getenv("STRIPE_PRICE_PRO_MONTHLY"),
+		PriceProYearly:       os.Getenv("STRIPE_PRICE_PRO_YEARLY"),
+		PriceBusinessMonthly: os.Getenv("STRIPE_PRICE_BUSINESS_MONTHLY"),
+		PriceBusinessYearly:  os.Getenv("STRIPE_PRICE_BUSINESS_YEARLY"),
 	}
 }
 
@@ -44,6 +45,18 @@ type Service struct {
 func NewService(fs *firestore.Client, cfg Config) *Service {
 	stripe.Key = cfg.SecretKey
 	return &Service{fs: fs, config: cfg}
+}
+
+// resolvePlan reads planOverride first, then falls back to plan field.
+func resolvePlan(dojoData map[string]interface{}) string {
+	plan, _ := dojoData["planOverride"].(string)
+	if plan == "" {
+		plan, _ = dojoData["plan"].(string)
+	}
+	if plan == "" {
+		plan = "free"
+	}
+	return plan
 }
 
 func (s *Service) CreateCheckoutSession(ctx context.Context, userUID string, input CreateCheckoutInput) (string, error) {
@@ -187,14 +200,16 @@ func (s *Service) GetSubscriptionInfo(ctx context.Context, dojoID string) (*Subs
 
 	dojoData := dojoDoc.Data()
 
-	plan, _ := dojoData["plan"].(string)
-	if plan == "" {
-		plan = "free"
-	}
+	// ★ planOverride があればそちらを優先（プロモコード・デモ用）
+	plan := resolvePlan(dojoData)
 
 	status, _ := dojoData["subscriptionStatus"].(string)
 	if status == "" {
-		status = "none"
+		if plan != "free" && dojoData["planOverride"] != nil {
+			status = "active" // プロモコード適用中はactiveとして扱う
+		} else {
+			status = "none"
+		}
 	}
 
 	var periodEnd *time.Time
@@ -309,10 +324,9 @@ func (s *Service) CheckPlanLimit(ctx context.Context, dojoID, resource string) e
 	}
 
 	dojoData := dojoDoc.Data()
-	plan, _ := dojoData["plan"].(string)
-	if plan == "" {
-		plan = "free"
-	}
+
+	// ★ planOverride があればそちらを優先（プロモコード・デモ用）
+	plan := resolvePlan(dojoData)
 
 	limits := GetPlanLimits(plan)
 	var limit int
@@ -342,6 +356,69 @@ func (s *Service) CheckPlanLimit(ctx context.Context, dojoID, resource string) e
 	if current >= limit {
 		return fmt.Errorf("%w: %s limit reached (%d/%d). Upgrade your plan to add more.",
 			ErrLimitReached, resource, current, limit)
+	}
+
+	return nil
+}
+
+// ★ ApplyPromoCode validates a promo code and applies planOverride to the dojo
+func (s *Service) ApplyPromoCode(ctx context.Context, dojoID, code string) error {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if code == "" {
+		return fmt.Errorf("%w: promo code is required", ErrBadRequest)
+	}
+
+	// Look up the promo code in Firestore
+	promoDoc, err := s.fs.Collection("promoCodes").Doc(code).Get(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: invalid promo code", ErrBadRequest)
+	}
+
+	promoData := promoDoc.Data()
+
+	// Check if active
+	isActive, _ := promoData["isActive"].(bool)
+	if !isActive {
+		return fmt.Errorf("%w: this promo code is no longer active", ErrBadRequest)
+	}
+
+	// Check expiration
+	if expiresAt, ok := promoData["expiresAt"].(time.Time); ok {
+		if time.Now().UTC().After(expiresAt) {
+			return fmt.Errorf("%w: this promo code has expired", ErrBadRequest)
+		}
+	}
+
+	// Check max uses
+	if maxUses, ok := promoData["maxUses"].(int64); ok && maxUses > 0 {
+		usedCount, _ := promoData["usedCount"].(int64)
+		if usedCount >= maxUses {
+			return fmt.Errorf("%w: this promo code has reached its usage limit", ErrBadRequest)
+		}
+	}
+
+	// Get the plan to grant (default: business)
+	grantPlan, _ := promoData["plan"].(string)
+	if grantPlan == "" {
+		grantPlan = PlanBusiness
+	}
+
+	// Apply planOverride to the dojo
+	_, err = s.fs.Collection("dojos").Doc(dojoID).Set(ctx, map[string]interface{}{
+		"planOverride":    grantPlan,
+		"promoCode":       code,
+		"promoAppliedAt":  time.Now().UTC(),
+	}, firestore.MergeAll)
+	if err != nil {
+		return fmt.Errorf("failed to apply promo code: %w", err)
+	}
+
+	// Increment usage counter
+	_, err = s.fs.Collection("promoCodes").Doc(code).Set(ctx, map[string]interface{}{
+		"usedCount": firestore.Increment(1),
+	}, firestore.MergeAll)
+	if err != nil {
+		log.Printf("failed to increment promo code usage: %v", err)
 	}
 
 	return nil

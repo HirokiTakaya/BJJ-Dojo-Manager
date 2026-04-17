@@ -522,7 +522,9 @@ export function subscribeNoticesForStaff(
   );
 }
 
-// Inbox fallback subscription
+// ─────────────────────────────────────────────────────────────
+// ✅ FIX: Inbox fallback — filter out expired notices with endTime
+// ─────────────────────────────────────────────────────────────
 function subscribeMemberInboxFallback(
   dojoId: string,
   uid: string,
@@ -533,14 +535,12 @@ function subscribeMemberInboxFallback(
   const col = collection(db(), 'dojos', dojoId, 'members', uid, MEMBER_INBOX_SUBCOL);
 
   const now = nowForQuery();
-  const minTs = Timestamp.fromMillis(0);
 
   const qInbox = query(
     col,
     where('status', 'in', ['sent', 'scheduled']),
-    where('sendAt', '>=', minTs),
-    where('sendAt', '<=', now),
-    orderBy('sendAt', 'desc'),
+    where('endTime', '>=', now),
+    orderBy('endTime', 'desc'),
     limit(n)
   );
 
@@ -558,12 +558,12 @@ function subscribeMemberInboxFallback(
 }
 
 /**
- * ✅ Member: realtime list
- * 
+ * ✅ FIX: Member realtime list — filter out expired notices with endTime
+ *
  * Strategy:
- * 1. qAll: notices with audienceType='all' (everyone can see)
- * 2. inbox: notices in members/{uid}/noticeInbox (targeted notices via fanout)
- * 
+ * 1. qAll: notices with audienceType='all' AND endTime >= now (not expired)
+ * 2. inbox: notices in members/{uid}/noticeInbox AND endTime >= now
+ *
  * Note: We don't query notices with audienceType='uids' directly because
  * Firestore Rules can't efficiently validate array-contains queries.
  * Instead, staff fanouts targeted notices to each member's inbox.
@@ -578,16 +578,14 @@ export function subscribeNoticesForMember(
   const col = collection(db(), 'dojos', dojoId, 'notices');
 
   const now = nowForQuery();
-  const minTs = Timestamp.fromMillis(0);
 
-  // Query for notices visible to all members
+  // ✅ FIX: endTime >= now で期限切れを除外
   const qAll = query(
     col,
     where('status', 'in', ['sent', 'scheduled']),
     where('audienceType', '==', 'all'),
-    where('sendAt', '>=', minTs),
-    where('sendAt', '<=', now),
-    orderBy('sendAt', 'desc'),
+    where('endTime', '>=', now),
+    orderBy('endTime', 'desc'),
     limit(n)
   );
 

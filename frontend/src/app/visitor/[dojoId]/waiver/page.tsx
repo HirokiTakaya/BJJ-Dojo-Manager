@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -12,7 +11,7 @@ import {
   firebaseDisabledReason,
 } from "@/firebase";
 
-import { signInAnonymously } from "firebase/auth";
+import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
 import {
   collection,
   doc,
@@ -66,6 +65,87 @@ function randomCode6(): string {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+
+
+// Signature helpers
+type SignaturePoint = { x: number; y: number };
+type SignatureStroke = SignaturePoint[];
+
+function normalizeSignatureStrokes(raw: unknown): SignatureStroke[] {
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map((stroke) => {
+      if (!Array.isArray(stroke)) return [];
+
+      return stroke
+        .map((pt) => {
+          const x =
+            typeof (pt as any)?.x === "number"
+              ? (pt as any).x
+              : Number((pt as any)?.x);
+          const y =
+            typeof (pt as any)?.y === "number"
+              ? (pt as any).y
+              : Number((pt as any)?.y);
+
+          if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+          return { x, y };
+        })
+        .filter((pt): pt is SignaturePoint => !!pt);
+    })
+    .filter((stroke): stroke is SignatureStroke => stroke.length > 0);
+}
+
+function buildSignatureSvg(raw: unknown): string {
+  const strokes = normalizeSignatureStrokes(raw);
+  if (strokes.length === 0) return "";
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const stroke of strokes) {
+    for (const pt of stroke) {
+      if (pt.x < minX) minX = pt.x;
+      if (pt.y < minY) minY = pt.y;
+      if (pt.x > maxX) maxX = pt.x;
+      if (pt.y > maxY) maxY = pt.y;
+    }
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return "";
+
+  const padding = 10;
+  const width = Math.max(1, maxX - minX + padding * 2);
+  const height = Math.max(1, maxY - minY + padding * 2);
+
+  const paths = strokes
+    .map((stroke) => {
+      if (stroke.length < 2) return "";
+
+      const d = stroke
+        .map((pt, i) => {
+          const x = pt.x - minX + padding;
+          const y = pt.y - minY + padding;
+          return `${i === 0 ? "M" : "L"}${x},${y}`;
+        })
+        .join(" ");
+
+      return `<path d="${d}" fill="none" stroke="#1F2937" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />`;
+    })
+    .filter(Boolean)
+    .join("");
+
+  if (!paths) return "";
+
+  return `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+  ${paths}
+</svg>`.trim();
+}
+
 // ── Main Page ────────────────────────────────────────────────
 export default function VisitorWaiverPage() {
   const router = useRouter();
@@ -98,9 +178,35 @@ export default function VisitorWaiverPage() {
   const [agreedMinor, setAgreedMinor] = useState(false);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
 
+  const [authChecked, setAuthChecked] = useState(false);
+
+  // ✅ FIX: Use onAuthStateChanged for reliable auth detection.
+  // currentUser can be null during initialization even if user is logged in.
+  // This prevents ensureGuestAuth() from overwriting logged-in sessions.
+  useEffect(() => {
+    if (!authNullable || !dojoId) {
+      setAuthChecked(true);
+      return;
+    }
+
+    const unsub = onAuthStateChanged(authNullable, (user) => {
+      if (user && !user.isAnonymous) {
+        router.replace(`/dojos/${encodeURIComponent(dojoId)}/waiver`);
+        return;
+      }
+      setAuthChecked(true);
+    });
+
+    return () => unsub();
+  }, [dojoId, router]);
+
   // ── Load dojo + template ─────────────────────────────────
   useEffect(() => {
     if (!dojoId) return;
+    // ✅ FIX: Wait for auth check before loading. If user is logged in,
+    // they'll be redirected before ensureGuestAuth() is ever called.
+    if (!authChecked) return;
+
     let cancelled = false;
 
     const load = async () => {
@@ -111,40 +217,49 @@ export default function VisitorWaiverPage() {
         const db = dbNullable;
         if (!db) throw new Error("Firestore is not initialized.");
 
-        // Dojo name
-        const dojoSnap = await getDoc(doc(db, "dojos", dojoId));
+        // ✅ FIX: Use publicDojos for dojo name (no permission issues for anonymous users)
+        const dojoSnap = await getDoc(doc(db, "publicDojos", dojoId));
         if (dojoSnap.exists()) {
           const d = dojoSnap.data() as any;
           setDojoName(d.name || d.displayName || d.dojoName || "");
         }
 
-        // Try Firestore template first
-        const tQuery = query(
-          collection(db, "dojos", dojoId, "waiverTemplates"),
-          where("active", "==", true),
-          limit(1)
-        );
-        const tSnap = await getDocs(tQuery);
+        // ✅ FIX: Try waiverTemplates but catch permission errors gracefully.
+        // Anonymous users may not have access to waiverTemplates,
+        // so fall back to built-in waiver on permission error.
+        let templateFound = false;
+        try {
+          const tQuery = query(
+            collection(db, "dojos", dojoId, "waiverTemplates"),
+            where("active", "==", true),
+            limit(1)
+          );
+          const tSnap = await getDocs(tQuery);
 
-        if (!tSnap.empty) {
-          const doc0 = tSnap.docs[0];
-          const td = doc0.data() as any;
-          if (!cancelled) {
-            setFirestoreTemplate({
-              id: doc0.id,
-              title: td.title || "Liability Waiver",
-              body: td.body || td.text || "",
-              version: td.version,
-              bodyHash: td.bodyHash,
-            });
-            setUseBuiltIn(false);
+          if (!tSnap.empty) {
+            const doc0 = tSnap.docs[0];
+            const td = doc0.data() as any;
+            if (!cancelled) {
+              setFirestoreTemplate({
+                id: doc0.id,
+                title: td.title || "Liability Waiver",
+                body: td.body || td.text || "",
+                version: td.version,
+                bodyHash: td.bodyHash,
+              });
+              setUseBuiltIn(false);
+              templateFound = true;
+            }
           }
-        } else {
-          // No Firestore template → use built-in BJJ waiver
-          if (!cancelled) {
-            setFirestoreTemplate(null);
-            setUseBuiltIn(true);
-          }
+        } catch (templateErr: any) {
+          // Permission denied for waiverTemplates is expected for anonymous users
+          console.warn("[visitor-waiver] Could not load waiverTemplates, using built-in:", templateErr?.message);
+        }
+
+        // No Firestore template found or permission denied → use built-in BJJ waiver
+        if (!templateFound && !cancelled) {
+          setFirestoreTemplate(null);
+          setUseBuiltIn(true);
         }
       } catch (e: any) {
         if (!cancelled) setError(e?.message || "Failed to load waiver.");
@@ -155,7 +270,7 @@ export default function VisitorWaiverPage() {
 
     load();
     return () => { cancelled = true; };
-  }, [dojoId]);
+  }, [dojoId, authChecked]);
 
   // ── Derived built-in content ─────────────────────────────
   const builtInTitle = getWaiverTitle(locale);
@@ -189,6 +304,8 @@ export default function VisitorWaiverPage() {
 
       const submissionId = randomId();
       const confirmationCode = randomCode6();
+      const strokesJson = JSON.stringify(strokes);
+      const svgMarkup = buildSignatureSvg(strokes);
 
       await setDoc(doc(db, "dojos", dojoId, "waiverSubmissions", submissionId), {
         dojoId,
@@ -197,7 +314,9 @@ export default function VisitorWaiverPage() {
 
         // Visitor info
         visitorName: name.trim(),
+        fullName: name.trim(),
         visitorEmail: email.trim() || null,
+        email: email.trim() || null,
         visitorPhone: phone.trim() || null,
         emergencyContactName: emergencyName.trim() || null,
         emergencyContactPhone: emergencyPhone.trim() || null,
@@ -218,7 +337,12 @@ export default function VisitorWaiverPage() {
 
         // Signature (Firestore does not support nested arrays,
         // so strokes are serialized as a JSON string)
-        signature: { type: "strokes", strokesJson: JSON.stringify(strokes), strokeCount: strokes.length },
+        signature: {
+          type: "strokes",
+          strokesJson,
+          strokeCount: strokes.length,
+          svgMarkup: svgMarkup || null,
+        },
 
         // Staff ops
         status: "new",
@@ -256,11 +380,18 @@ export default function VisitorWaiverPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
       <main className="max-w-2xl mx-auto px-4 py-8 space-y-5">
+        {/* ✅ FIX: Back button goes to browser history instead of hardcoded route */}
         <button
-          onClick={() => router.push("/visitor/select-dojo")}
+          onClick={() => {
+            if (window.history.length > 1) {
+              router.back();
+            } else {
+              router.push("/visitor");
+            }
+          }}
           className="text-sm text-slate-600 hover:underline"
         >
-          ← Back to dojo selection
+          ← Back
         </button>
 
         {/* Header */}

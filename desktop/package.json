@@ -7,11 +7,18 @@
   "private": true,
   "scripts": {
     "dev": "concurrently -k \"npm --prefix ../frontend run dev\" \"wait-on http://localhost:3000 && electron .\"",
-
     "build:web": "npm --prefix ../frontend run build",
 
     "dist:mac": "npm run build:web && npx electron-builder --mac dmg zip",
-    "dist:mac-unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:web && npx electron-builder --mac dmg zip"
+    "dist:mac-unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:web && npx electron-builder --mac dmg zip",
+
+    "dist:mac-zip": "npm run build:web && npx electron-builder --mac zip",
+    "dist:mac-zip-unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:web && npx electron-builder --mac zip",
+
+    "dist:mac-zip-x64-unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:web && npx electron-builder --mac zip --x64",
+    "dist:mac-zip-arm64-unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:web && npx electron-builder --mac zip --arm64",
+
+    "clean:dist": "rm -rf dist && mkdir -p dist"
   },
   "build": {
     "appId": "com.hirokitakaya.dojomanager",
@@ -19,7 +26,6 @@
     "directories": {
       "output": "dist"
     },
-
     "mac": {
       "target": [
         { "target": "dmg", "arch": ["arm64", "x64"] },
@@ -29,12 +35,10 @@
       "hardenedRuntime": true,
       "icon": "build/icon.icns"
     },
-
     "files": [
       "**/*",
       "!dist/**"
     ],
-
     "extraResources": [
       {
         "from": "../frontend/.next/standalone",

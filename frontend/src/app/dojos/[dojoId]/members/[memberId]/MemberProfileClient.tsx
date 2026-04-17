@@ -18,6 +18,7 @@ import {
   query,
   orderBy,
   limit,
+  where,
   serverTimestamp,
 } from "firebase/firestore";
 
@@ -76,6 +77,32 @@ type RankHistory = {
   promotedBy: string;
   notes?: string;
   createdAt: any;
+};
+
+// ✅ NEW: Waiver submission type (supports both waiverSubmissions and waivers collections)
+type WaiverSubmission = {
+  id: string;
+  signerType: string;
+  visitorName?: string;
+  fullName?: string;
+  visitorEmail?: string;
+  email?: string;
+  templateTitle?: string;
+  templateVersion?: string;
+  waiverVersion?: string;
+  status: string;
+  agreed?: boolean;
+  agreedToWaiver?: boolean;
+  signedAt: any;
+  createdAt: any;
+  locale?: string;
+  signature?: {
+    type: string;
+    strokesJson?: string;
+    strokeCount?: number;
+  };
+  // Source tracking
+  _source?: "waiverSubmissions" | "waivers";
 };
 
 // ─────────────────────────────────────────────
@@ -193,6 +220,102 @@ function BeltVisual({ belt, pattern, size = "lg" }: { belt?: string; pattern: St
 }
 
 // ─────────────────────────────────────────────
+// Signature Preview (renders strokes as SVG)
+// ─────────────────────────────────────────────
+
+// SignaturePad stores strokes as number[][][] where each point is [x, y]
+// and coordinates are normalized to 0-1 range
+type StrokePoint = [number, number] | { x: number; y: number };
+type StrokeData = StrokePoint[];
+
+function getXY(pt: StrokePoint): [number, number] {
+  if (Array.isArray(pt)) return [pt[0], pt[1]];
+  return [pt.x, pt.y];
+}
+
+function SignaturePreview({ strokesJson }: { strokesJson?: string }) {
+  if (!strokesJson || strokesJson === "[]") return null;
+
+  let strokes: StrokeData[] = [];
+  try {
+    strokes = JSON.parse(strokesJson);
+  } catch {
+    return null;
+  }
+
+  if (!Array.isArray(strokes) || strokes.length === 0) return null;
+
+  // Check if coordinates are normalized (0-1) or absolute pixels
+  let maxCoord = 0;
+  for (const stroke of strokes) {
+    if (!Array.isArray(stroke)) continue;
+    for (const pt of stroke) {
+      const [x, y] = getXY(pt);
+      if (x > maxCoord) maxCoord = x;
+      if (y > maxCoord) maxCoord = y;
+    }
+  }
+
+  // If all coordinates are <= 1, they're normalized. Scale to viewBox size.
+  const isNormalized = maxCoord <= 1.5;
+  const scale = isNormalized ? 400 : 1; // Scale normalized coords to 400px canvas
+
+  // Calculate bounding box (after scaling)
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const stroke of strokes) {
+    if (!Array.isArray(stroke)) continue;
+    for (const pt of stroke) {
+      const [x, y] = getXY(pt);
+      const sx = x * scale;
+      const sy = y * scale;
+      if (sx < minX) minX = sx;
+      if (sy < minY) minY = sy;
+      if (sx > maxX) maxX = sx;
+      if (sy > maxY) maxY = sy;
+    }
+  }
+
+  if (!isFinite(minX)) return null;
+
+  const padding = 10;
+  const width = Math.max(maxX - minX + padding * 2, 100);
+  const height = Math.max(maxY - minY + padding * 2, 50);
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-3">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full h-auto max-h-32"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        {strokes.map((stroke, i) => {
+          if (!Array.isArray(stroke) || stroke.length < 2) return null;
+          const d = stroke
+            .map((pt, j) => {
+              const [x, y] = getXY(pt);
+              const sx = x * scale - minX + padding;
+              const sy = y * scale - minY + padding;
+              return `${j === 0 ? "M" : "L"}${sx.toFixed(2)},${sy.toFixed(2)}`;
+            })
+            .join(" ");
+          return (
+            <path
+              key={i}
+              d={d}
+              fill="none"
+              stroke="#1F2937"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
 // Main Component
 // ─────────────────────────────────────────────
 
@@ -202,13 +325,15 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
 
-  // Resolve IDs
+  // Resolve IDs — handle both [dojoId] and [dojold] folder name variants
   const dojoId = useMemo(() => {
-    return props.dojoId || (params as any)?.dojoId || searchParams.get("dojoId") || "";
+    const p = params as any;
+    return props.dojoId || p?.dojoId || p?.dojold || p?.dojoID || searchParams.get("dojoId") || "";
   }, [props.dojoId, params, searchParams]);
 
   const memberId = useMemo(() => {
-    return props.memberId || (params as any)?.memberId || "";
+    const p = params as any;
+    return props.memberId || p?.memberId || p?.memberld || p?.memberID || "";
   }, [props.memberId, params]);
 
   const { dojoName } = useDojoName(dojoId);
@@ -217,6 +342,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
   const [profile, setProfile] = useState<MemberProfile | null>(null);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [rankHistory, setRankHistory] = useState<RankHistory[]>([]);
+  const [waiverSubmissions, setWaiverSubmissions] = useState<WaiverSubmission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -235,6 +361,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
   const [rankNotes, setRankNotes] = useState("");
 
   const isStaff = useMemo(() => resolveIsStaff(userDoc), [userDoc]);
+  const isSelf = useMemo(() => user?.uid === memberId, [user, memberId]);
 
   const displayPattern = useMemo<StripePattern>(() => {
     return clampPattern(profile?.stripePattern, profile?.stripes || 0, defaultStripeToken(profile?.beltRank));
@@ -246,12 +373,20 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
     return Math.round((ok / attendance.length) * 100);
   }, [attendance]);
 
+  // ✅ NEW: Latest waiver status
+  const latestWaiver = useMemo(() => {
+    if (waiverSubmissions.length === 0) return null;
+    return waiverSubmissions[0]; // Already sorted by createdAt desc
+  }, [waiverSubmissions]);
+
+  const waiverSigned = !!latestWaiver;
+
   // ─── Auth Gate ───
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
   }, [authLoading, user, router]);
 
-  // ─── Load Data (OPTIMIZED: parallel queries, no N+1) ───
+  // ─── Load Data ───
   useEffect(() => {
     if (authLoading || !user || !dojoId || !memberId) {
       if (!authLoading) setLoading(false);
@@ -264,7 +399,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
 
     const load = async () => {
       try {
-        // ✅ Parallel: load user doc, member doc, user doc (for merge), rank history ALL at once
+        // ✅ Parallel: load user doc, member doc, user doc (for merge), rank history
         const [userSnap, memberSnap, memberUserSnap, rankSnap] = await Promise.all([
           getDoc(doc(db, "users", user.uid)),
           getDoc(doc(db, "dojos", dojoId, "members", memberId)),
@@ -273,8 +408,8 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
             collection(db, "dojos", dojoId, "members", memberId, "rankHistory"),
             orderBy("createdAt", "desc"),
             limit(10)
-          )).catch(() => null), // rankHistory may not exist yet
-        ]); // ✅ FIX: close Promise.all(...)
+          )).catch(() => null),
+        ]);
 
         if (cancelled) return;
 
@@ -319,22 +454,76 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
           setRankHistory(rankSnap.docs.map((d) => ({ id: d.id, ...d.data() } as RankHistory)));
         }
 
-        // ✅ OPTIMIZED: Load attendance from attendees subcollections
-        // Instead of looping through ALL sessions × 1 getDoc each (N+1),
-        // we load sessions list first, then batch-check attendees in parallel (max 20 concurrent)
+        // ✅ FIX: Load waivers from BOTH collections (waiverSubmissions + waivers)
+        const allWaivers: WaiverSubmission[] = [];
+
+        // 1) waiverSubmissions (new system)
+        try {
+          const wsSnap = await getDocs(query(
+            collection(db, "dojos", dojoId, "waiverSubmissions"),
+            where("authUid", "==", memberId),
+            orderBy("createdAt", "desc"),
+            limit(5)
+          ));
+          for (const d of wsSnap.docs) {
+            allWaivers.push({ id: d.id, ...d.data(), _source: "waiverSubmissions" } as WaiverSubmission);
+          }
+        } catch (e) {
+          console.warn("[profile] waiverSubmissions query failed:", e);
+        }
+
+        // 2) waivers (legacy system)
+        try {
+          const wSnap = await getDocs(query(
+            collection(db, "dojos", dojoId, "waivers"),
+            where("uid", "==", memberId),
+            limit(5)
+          ));
+          for (const d of wSnap.docs) {
+            const data = d.data() as any;
+            allWaivers.push({
+              id: d.id,
+              signerType: "member",
+              visitorName: data.fullName,
+              fullName: data.fullName,
+              visitorEmail: data.email,
+              email: data.email,
+              status: "signed",
+              agreed: data.agreedToWaiver,
+              agreedToWaiver: data.agreedToWaiver,
+              waiverVersion: data.waiverVersion,
+              signedAt: data.signedAt,
+              createdAt: data.signedAt,
+              locale: data.locale,
+              _source: "waivers",
+            } as WaiverSubmission);
+          }
+        } catch (e) {
+          console.warn("[profile] waivers query failed:", e);
+        }
+
+        // Sort by date, newest first
+        allWaivers.sort((a, b) => {
+          const ta = a.signedAt?.seconds || a.createdAt?.seconds || 0;
+          const tb = b.signedAt?.seconds || b.createdAt?.seconds || 0;
+          return tb - ta;
+        });
+
+        if (!cancelled) {
+          setWaiverSubmissions(allWaivers);
+        }
+
+        // Load attendance
         try {
           const sessionsSnap = await getDocs(collection(db, "dojos", dojoId, "sessions"));
           const sessionDocs = sessionsSnap.docs;
 
-          // Build a map of session metadata
           const sessionMeta = new Map<string, { dateKey: string; title: string }>();
           for (const sd of sessionDocs) {
             const d = sd.data() as any;
             sessionMeta.set(sd.id, { dateKey: d.dateKey || "", title: d.title || "Session" });
           }
 
-          // ✅ Parallel: check attendees + reservations for this member across all sessions
-          // Use batches of 20 to avoid overloading
           const BATCH_SIZE = 20;
           const records: AttendanceRecord[] = [];
 
@@ -343,21 +532,18 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
             const results = await Promise.all(
               batch.map(async (sd) => {
                 const meta = sessionMeta.get(sd.id)!;
-                // Check attendees first (new system)
                 try {
                   const attSnap = await getDoc(doc(db, "dojos", dojoId, "sessions", sd.id, "attendees", memberId));
                   if (attSnap.exists()) {
                     return { sessionId: sd.id, dateKey: meta.dateKey, title: meta.title, status: "present" as const };
                   }
                 } catch {}
-                // Check reservations (legacy)
                 try {
                   const resSnap = await getDoc(doc(db, "dojos", dojoId, "sessions", sd.id, "reservations", memberId));
                   if (resSnap.exists() && resSnap.data()?.status !== "cancelled") {
                     return { sessionId: sd.id, dateKey: meta.dateKey, title: meta.title, status: "present" as const };
                   }
                 } catch {}
-                // Check attendance subcollection (original system)
                 try {
                   const attSnap2 = await getDoc(doc(db, "dojos", dojoId, "sessions", sd.id, "attendance", memberId));
                   if (attSnap2.exists()) {
@@ -496,6 +682,14 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
             Missing dojo or member ID.
           </div>
+          <div className="mt-4 bg-gray-100 border border-gray-200 rounded-lg p-4 text-xs text-gray-600 space-y-1">
+            <p>dojoId: {dojoId || "(empty)"}</p>
+            <p>memberId: {memberId || "(empty)"}</p>
+            <p>props.dojoId: {props.dojoId || "(empty)"}</p>
+            <p>props.memberId: {props.memberId || "(empty)"}</p>
+            <p>params keys: {JSON.stringify(Object.keys(params || {}))}</p>
+            <p>params raw: {JSON.stringify(params || {})}</p>
+          </div>
         </main>
         <BottomNavigation />
       </div>
@@ -564,6 +758,12 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
                 }`}>
                   {profile.status}
                 </span>
+                {/* ✅ NEW: Waiver status badge */}
+                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                  waiverSigned ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                }`}>
+                  {waiverSigned ? "✅ Waiver Signed" : "❌ Waiver Not Signed"}
+                </span>
               </div>
             </div>
 
@@ -582,6 +782,92 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
               )}
             </div>
           </div>
+        </div>
+
+        {/* ✅ NEW: Waiver Status Card */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-4">Waiver Status</h3>
+
+          {waiverSigned ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3">
+                <span className="text-2xl">✅</span>
+                <div>
+                  <p className="text-sm font-semibold text-green-800">Waiver Signed</p>
+                  <p className="text-xs text-green-600">Signed on {formatDate(latestWaiver?.signedAt || latestWaiver?.createdAt)}</p>
+                </div>
+              </div>
+
+              {/* Signature preview */}
+              {latestWaiver?.signature?.strokesJson && latestWaiver.signature.strokesJson !== "[]" && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-2">Signature</p>
+                  <SignaturePreview strokesJson={latestWaiver.signature.strokesJson} />
+                </div>
+              )}
+
+              {/* Waiver history */}
+              <div className="space-y-2">
+                {waiverSubmissions.map((ws) => {
+                  const name = ws.visitorName || ws.fullName || "—";
+                  const version = ws.templateVersion || ws.waiverVersion;
+                  const source = ws._source === "waivers" ? "Legacy" : ws.signerType === "member" ? "Member" : "Visitor";
+
+                  return (
+                    <div key={ws.id} className="rounded-xl bg-gray-50 border border-gray-100 overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-3">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">
+                            {ws.templateTitle || "Liability Waiver"}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {name} • {source}
+                            {version && ` • v${version}`}
+                          </p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                            ws.status === "new" ? "bg-blue-100 text-blue-700" :
+                            ws.status === "reviewed" ? "bg-green-100 text-green-700" :
+                            ws.status === "signed" ? "bg-green-100 text-green-700" :
+                            "bg-gray-100 text-gray-600"
+                          }`}>
+                            {ws.status === "new" ? "Pending Review" :
+                             ws.status === "reviewed" ? "Reviewed" :
+                             ws.status === "signed" ? "Signed" : ws.status}
+                          </span>
+                          <p className="text-xs text-gray-400 mt-1">{formatDate(ws.signedAt || ws.createdAt)}</p>
+                        </div>
+                      </div>
+
+                      {/* Inline signature for each waiver */}
+                      {ws.signature?.strokesJson && ws.signature.strokesJson !== "[]" && (
+                        <div className="px-4 pb-3">
+                          <SignaturePreview strokesJson={ws.signature.strokesJson} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+              <span className="text-2xl">❌</span>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-red-800">Waiver Not Signed</p>
+                <p className="text-xs text-red-600">This member has not signed the waiver yet.</p>
+              </div>
+              {isSelf && (
+                <button
+                  onClick={() => router.push(`/dojos/${encodeURIComponent(dojoId)}/waiver`)}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition flex-shrink-0"
+                >
+                  Sign Waiver
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Edit Mode */}
@@ -768,7 +1054,6 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
                   </select>
                 </div>
 
-                {/* Kids mode selector */}
                 {isKidsBelt(newBelt) && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Kids System</label>
@@ -783,7 +1068,6 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
                   </div>
                 )}
 
-                {/* IBJJF degree */}
                 {isKidsBelt(newBelt) && stripeMode === "ibjjf" && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Kids Degree (0–11)</label>
@@ -797,7 +1081,6 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
                   </div>
                 )}
 
-                {/* Manual stripes */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Stripes (4 slots)</label>
                   <div className="grid grid-cols-4 gap-3">
@@ -831,13 +1114,11 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
                   </div>
                 </div>
 
-                {/* Preview */}
                 <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-center">
                   <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Preview</p>
                   <BeltVisual belt={newBelt} pattern={stripeMode === "ibjjf" && isKidsBelt(newBelt) ? kidsDegreeToPattern(kidsDegree) : newPattern} size="lg" />
                 </div>
 
-                {/* Notes */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
                   <textarea value={rankNotes} onChange={(e) => setRankNotes(e.target.value)} rows={2} placeholder="e.g. Promoted at competition" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />

@@ -15,6 +15,8 @@ import SessionReservationsView from "./SessionReservationsView";
 // Types
 // ─────────────────────────────────────────────
 
+type ClassType = "adult" | "kids" | "mixed";
+
 type SessionData = {
   id: string;
   dojoId: string;
@@ -25,6 +27,7 @@ type SessionData = {
   durationMinute: number;
   timetableClassId?: string;
   instructor?: string;
+  classType?: ClassType;
 };
 
 type InstructorInfo = {
@@ -33,6 +36,12 @@ type InstructorInfo = {
   email?: string;
   roleInDojo?: string;
 };
+
+const CLASS_TYPE_OPTIONS: Array<{ value: ClassType; label: string; emoji: string }> = [
+  { value: "adult", label: "Adult", emoji: "🥋" },
+  { value: "kids", label: "Kids", emoji: "👶" },
+  { value: "mixed", label: "Mixed", emoji: "👨‍👩‍👧" },
+];
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -59,6 +68,14 @@ async function loadInstructors(dojoId: string): Promise<InstructorInfo[]> {
   return list;
 }
 
+function normalizeClassType(raw?: any): ClassType {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "adult" || v === "kids" || v === "mixed") return v;
+  if (v === "kid" || v === "child" || v === "children" || v === "youth") return "kids";
+  if (v === "family") return "mixed";
+  return "adult";
+}
+
 // ─────────────────────────────────────────────
 // Instructor Select
 // ─────────────────────────────────────────────
@@ -78,7 +95,7 @@ function InstructorSelect({
         value={mode}
         onChange={(e) => { setMode(e.target.value as any); if (e.target.value === "select") onChange(""); }}
         disabled={disabled}
-        className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
       >
         <option value="select">Select from list</option>
         <option value="manual">Enter manually</option>
@@ -86,7 +103,7 @@ function InstructorSelect({
 
       {mode === "select" ? (
         <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}
-          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">(No instructor)</option>
           {instructors.map((i) => (
             <option key={i.uid} value={i.displayName}>{i.displayName}{i.roleInDojo ? ` (${i.roleInDojo})` : ""}</option>
@@ -95,8 +112,43 @@ function InstructorSelect({
       ) : (
         <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder="Enter instructor name..."
           disabled={disabled}
-          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
       )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// ClassType Select
+// ─────────────────────────────────────────────
+
+function ClassTypeSelect({
+  value, onChange, disabled,
+}: {
+  value: ClassType; onChange: (v: ClassType) => void; disabled?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {CLASS_TYPE_OPTIONS.map((opt) => {
+        const isSelected = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            disabled={disabled}
+            className={[
+              "rounded-full px-4 py-2 text-sm font-semibold transition",
+              isSelected
+                ? "bg-gray-900 text-white"
+                : "bg-gray-100 text-gray-700 hover:bg-gray-200",
+              disabled ? "cursor-not-allowed opacity-50" : "",
+            ].join(" ")}
+          >
+            {opt.emoji} {opt.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -136,6 +188,7 @@ export default function SessionDetailClient(props: Props) {
   const [editStartHHMM, setEditStartHHMM] = useState("07:00");
   const [editDurationMin, setEditDurationMin] = useState(60);
   const [editInstructor, setEditInstructor] = useState("");
+  const [editClassType, setEditClassType] = useState<ClassType>("adult");
 
   // Delete modal
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -178,14 +231,16 @@ export default function SessionDetailClient(props: Props) {
           const d = sessionSnap.data() as any;
           let instructorName = d.instructor || "";
           let title = d.title || "Session";
+          let classType: ClassType = normalizeClassType(d.classType);
 
-          if (d.timetableClassId && (!instructorName || title === "Session")) {
+          if (d.timetableClassId && (!instructorName || title === "Session" || !d.classType)) {
             try {
               const classSnap = await getDoc(doc(db, "dojos", dojoId, "timetableClasses", d.timetableClassId));
               if (classSnap.exists()) {
                 const cd = classSnap.data() as any;
                 if (!instructorName) instructorName = cd.instructor || "";
                 if (title === "Session") title = cd.title || title;
+                if (!d.classType && cd.classType) classType = normalizeClassType(cd.classType);
               }
             } catch {}
           }
@@ -195,6 +250,7 @@ export default function SessionDetailClient(props: Props) {
             dateKey: d.dateKey || "", weekday: d.weekday ?? 0,
             startMinute: d.startMinute ?? 0, durationMinute: d.durationMinute ?? 60,
             timetableClassId: d.timetableClassId, instructor: instructorName,
+            classType,
           };
         } else {
           const [dateKey, classId] = sessionId.split("__");
@@ -203,6 +259,7 @@ export default function SessionDetailClient(props: Props) {
           let weekday = dateKey ? new Date(dateKey + "T00:00:00").getDay() : 0;
           let startMinute = 0;
           let durationMinute = 60;
+          let classType: ClassType = "adult";
 
           if (classId) {
             try {
@@ -211,6 +268,7 @@ export default function SessionDetailClient(props: Props) {
                 const cd = classSnap.data() as any;
                 instructorName = cd.instructor || "";
                 title = cd.title || title;
+                classType = normalizeClassType(cd.classType);
                 if (cd.startMinute != null) startMinute = cd.startMinute;
                 else if (cd.startTime) startMinute = hhmmToMinutes(cd.startTime);
                 if (cd.durationMinute) durationMinute = cd.durationMinute;
@@ -219,7 +277,7 @@ export default function SessionDetailClient(props: Props) {
             } catch {}
           }
 
-          sessionData = { id: sessionId, dojoId, title, dateKey: dateKey || "", weekday, startMinute, durationMinute, timetableClassId: classId, instructor: instructorName };
+          sessionData = { id: sessionId, dojoId, title, dateKey: dateKey || "", weekday, startMinute, durationMinute, timetableClassId: classId, instructor: instructorName, classType };
         }
 
         if (!cancelled) {
@@ -229,6 +287,7 @@ export default function SessionDetailClient(props: Props) {
           setEditStartHHMM(minutesToHHMM(sessionData.startMinute));
           setEditDurationMin(sessionData.durationMinute);
           setEditInstructor(sessionData.instructor || "");
+          setEditClassType(sessionData.classType || "adult");
           setInstructors(instructorList);
         }
       } catch (e: any) {
@@ -253,6 +312,7 @@ export default function SessionDetailClient(props: Props) {
         title: editTitle.trim(), weekday: editWeekday,
         startMinute: newStartMinute, durationMinute: editDurationMin,
         instructor: editInstructor || undefined,
+        classType: editClassType,
       } as any);
 
       await setDoc(doc(db, "dojos", dojoId, "sessions", sessionId), {
@@ -261,6 +321,7 @@ export default function SessionDetailClient(props: Props) {
         startMinute: newStartMinute,
         durationMinute: editDurationMin,
         instructor: editInstructor || null,
+        classType: editClassType,
         updatedAt: serverTimestamp(),
         syncedFromTimetableAt: serverTimestamp(),
       }, { merge: true });
@@ -273,6 +334,7 @@ export default function SessionDetailClient(props: Props) {
         startMinute: newStartMinute,
         durationMinute: editDurationMin,
         instructor: editInstructor,
+        classType: editClassType,
       } : null);
       setSuccess("Class updated!");
     } catch (e: any) { setError(e?.message || "Update failed."); }
@@ -290,6 +352,15 @@ export default function SessionDetailClient(props: Props) {
     } catch (e: any) { setError(e?.message || "Delete failed."); }
     finally { setBusy(false); }
   };
+
+  // ─────────────────────────────────────────────
+  // Render helpers
+  // ─────────────────────────────────────────────
+
+  const classTypeInfo = useMemo(() => {
+    const ct = session?.classType || "adult";
+    return CLASS_TYPE_OPTIONS.find((o) => o.value === ct) || CLASS_TYPE_OPTIONS[0];
+  }, [session?.classType]);
 
   // ─────────────────────────────────────────────
   // Render
@@ -339,7 +410,9 @@ export default function SessionDetailClient(props: Props) {
                 Back to Timetable
               </button>
               {dojoName && <p className="text-sm font-medium text-blue-600 mb-1">{dojoName}</p>}
-              <h1 className="text-2xl font-bold text-gray-900">{session?.title || "Session"}</h1>
+              <h1 className="text-2xl font-bold text-gray-900">
+                {classTypeInfo.emoji} {session?.title || "Session"}
+              </h1>
               <div className="flex flex-wrap items-center gap-2 mt-3">
                 <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm font-medium">
                   📅 {session?.dateKey} ({WEEKDAYS.find((w) => w.value === session?.weekday)?.label})
@@ -349,6 +422,9 @@ export default function SessionDetailClient(props: Props) {
                 </span>
                 <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm font-medium">
                   ⏱ {session?.durationMinute} min
+                </span>
+                <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm font-medium">
+                  {classTypeInfo.emoji} {classTypeInfo.label}
                 </span>
                 {session?.instructor && (
                   <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
@@ -403,27 +479,34 @@ export default function SessionDetailClient(props: Props) {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
                   <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)}
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Weekday</label>
                     <select value={editWeekday} onChange={(e) => setEditWeekday(Number(e.target.value))}
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500">
                       {WEEKDAYS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Start</label>
                     <input value={editStartHHMM} onChange={(e) => setEditStartHHMM(e.target.value)} placeholder="07:00"
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Duration</label>
                     <input value={editDurationMin} onChange={(e) => setEditDurationMin(Number(e.target.value || "0"))} type="number"
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
+
+                {/* ✅ Class Type 選択 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Class Type</label>
+                  <ClassTypeSelect value={editClassType} onChange={setEditClassType} disabled={busy} />
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Instructor</label>
                   <InstructorSelect instructors={instructors} value={editInstructor} onChange={setEditInstructor} disabled={busy} />

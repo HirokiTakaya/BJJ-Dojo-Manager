@@ -23,20 +23,16 @@ service cloud.firestore {
       return request.auth.token;
     }
 
-    // ✅ セッション認証済みかどうか（Firestore の sessionVerified フラグで判定）
-    //
-    // 毎回ログイン時に sessionVerified = false にリセットされ、
-    // メールリンクをクリックすると true になる。
-    // Firebase Auth の email_verified には依存しない。
-    //
-    // ⚠️ get() は rules の呼び出しあたり最大10回までの制限あり。
-    //    1リクエストで verified() を複数回呼ぶヘルパーが連鎖すると
-    //    上限に達する可能性がある。キャッシュは自動で効くので
-    //    同一パスの get() は1回分としてカウントされる。
+    // ✅ FIXED:
+    // sessionVerified を優先しつつ、Firebase Auth の email_verified も許可。
+    // 既存の session verification ロジックは残し、メール認証済みユーザーも書き込み可能にする。
     function verified() {
-      return signedIn() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.sessionVerified == true;
+      // ✅ FIX: Optimized to use 1 get() instead of exists() + get() to save get() budget.
+      // get() on a non-existent doc returns null, so the .data check handles both cases.
+      return signedIn() && (
+        token().email_verified == true ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.sessionVerified == true
+      );
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -59,13 +55,10 @@ service cloud.firestore {
       return v is string && v.size() > 0 && v.size() <= max;
     }
 
-    // ✅ NEW: フィールド長の上限チェック（任意フィールド用）
-    // フィールドが存在しない、null、または max 以下の string なら OK
     function optStringMaxLen(data, field, max) {
       return !(field in data) || data[field] == null || (data[field] is string && data[field].size() <= max);
     }
 
-    // ✅ Reservation validation helpers
     function isValidReservationStatus(s) {
       return s in ['confirmed', 'cancelled'];
     }
@@ -76,7 +69,6 @@ service cloud.firestore {
       return
         ('memberId' in d) && (d.memberId == memberUid) &&
         ('memberName' in d) && isNonEmptyString(d.memberName) &&
-        // ✅ NEW: memberName 長さ制限
         d.memberName.size() <= 100 &&
         ('status' in d) && isValidReservationStatus(d.status) &&
         (!('dojoId' in d) || d.dojoId == dojoId) &&
@@ -86,7 +78,6 @@ service cloud.firestore {
         (!('updatedAt' in d) || d.updatedAt is timestamp);
     }
 
-    // ✅ Waiver validation helpers
     function isValidWaiverSignerType(t) {
       return t in ['visitor', 'member'];
     }
@@ -102,7 +93,6 @@ service cloud.firestore {
         (('memberEmail' in d) && (d.memberEmail is string) && d.memberEmail.size() > 0);
     }
 
-    // ✅ 署名データチェック（strokes は JSON 文字列として保存）
     function signatureOk(d) {
       return ('signature' in d) &&
         (d.signature is map) &&
@@ -134,21 +124,21 @@ service cloud.firestore {
         ('signerType' in d) && isValidWaiverSignerType(d.signerType) &&
         ('agreed' in d) && (d.agreed == true) &&
         ('status' in d) && (d.status == 'new') &&
-        signatureOk(d) &&
         ('templateId' in d) && (d.templateId is string) && (d.templateId.size() > 0) &&
         ('authUid' in d) && (d.authUid == uid()) &&
         (
           (d.signerType == 'visitor' &&
             ('visitorName' in d) && isNonEmptyString(d.visitorName) &&
-            // ✅ NEW: visitorName 長さ制限
             d.visitorName.size() <= 100 &&
             hasContactInfo(d) &&
+            signatureOk(d) &&
             (!('isMinor' in d) || d.isMinor is bool) &&
             (!(('isMinor' in d) && d.isMinor == true) || (('guardianName' in d) && isNonEmptyString(d.guardianName)))
           )
           ||
           (d.signerType == 'member' &&
-            ('memberUid' in d) && (d.memberUid == uid())
+            ('memberUid' in d) && (d.memberUid == uid()) &&
+            signatureOk(d)
           )
         ) &&
         (!('signedAt' in d) || d.signedAt is timestamp) &&
@@ -170,7 +160,6 @@ service cloud.firestore {
       (!('reviewedAt' in request.resource.data) || request.resource.data.reviewedAt is timestamp) &&
       (!('updatedAt' in request.resource.data) || request.resource.data.updatedAt is timestamp) &&
       (!('reviewedBy' in request.resource.data) || request.resource.data.reviewedBy is string) &&
-      // ✅ NEW: notes 長さ制限
       (!('notes' in request.resource.data) || (request.resource.data.notes is string && request.resource.data.notes.size() <= 2000));
     }
 
@@ -441,10 +430,9 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // SECTION 11: FIELD LENGTH VALIDATION HELPERS  ← ✅ NEW SECTION
+    // SECTION 11: FIELD LENGTH VALIDATION HELPERS
     // ═══════════════════════════════════════════════════════════════
 
-    // members/{memberUid} 書き込み時のフィールド長チェック
     function memberFieldsOk() {
       let d = request.resource.data;
       return optStringMaxLen(d, 'displayName', 100) &&
@@ -456,7 +444,6 @@ service cloud.firestore {
              optStringMaxLen(d, 'roleInDojo', 30);
     }
 
-    // dojos create/update 時のフィールド長チェック
     function dojoFieldsOk() {
       let d = request.resource.data;
       return optStringMaxLen(d, 'name', 150) &&
@@ -467,7 +454,6 @@ service cloud.firestore {
              optStringMaxLen(d, 'phone', 30);
     }
 
-    // users create/update 時のフィールド長チェック
     function userFieldsOk() {
       let d = request.resource.data;
       return optStringMaxLen(d, 'displayName', 100) &&
@@ -480,30 +466,19 @@ service cloud.firestore {
 
     // ───────────────────────────────────────────────────────────────
     // USERS COLLECTION
-    //
-    // ✅ CHANGED: create/update にフィールド長制限 + role 自己昇格防止を追加
-    // ✅ NOTE: users の create は登録直後（emailVerified = false）なので
-    //          verified() は要求しない。ただし isSelf() は必須。
     // ───────────────────────────────────────────────────────────────
     match /users/{userId} {
       allow read: if signedIn();
 
-      // ✅ CHANGED: フィールド長制限 + role 自己昇格防止を追加
       allow create: if isSelf(userId)
         && userFieldsOk()
         && (!('role' in request.resource.data)
             || request.resource.data.role in ['student', 'staff_member']);
 
-      // ✅ sessionVerified フローに必要なフィールドのみの更新
-      //    本人が sessionVerified を false にリセットするのは常に許可。
-      //    true にする場合は sessionVerifiedAt（timestamp）も必須。
-      //    → 攻撃者が直接 true にセットしても、他コレクションへの
-      //      書き込みには別途 isDojoStaff 等のチェックがあるため被害は限定的。
       allow update: if isSelf(userId)
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['sessionVerified', 'sessionVerifiedAt', 'updatedAt', 'lastLoginAt',
                        'emailVerified', 'pendingDojoAction'])
-        // sessionVerified を true にする場合は sessionVerifiedAt も必須
         && (
           request.resource.data.sessionVerified == false
           || (request.resource.data.sessionVerified == true
@@ -512,8 +487,6 @@ service cloud.firestore {
           || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['sessionVerified'])
         );
 
-      // ✅ CHANGED: フィールド長制限 + 本人による role 変更防止を追加
-      // 上記の sessionVerified ルール以外の一般的な更新
       allow update: if (isSelf(userId) || isAdmin())
         && userFieldsOk()
         && (isAdmin()
@@ -525,42 +498,43 @@ service cloud.firestore {
 
     // ───────────────────────────────────────────────────────────────
     // DOJOS COLLECTION
-    //
-    // ✅ CHANGED: create/update に verified() + dojoFieldsOk() を追加
     // ───────────────────────────────────────────────────────────────
     match /dojos/{dojoId} {
-      allow read: if resource.data.isPublic == true
-        || (signedIn() && (
+      // ✅ FIX: Split into two allow read rules.
+      // First rule handles public dojos (no get() calls needed).
+      // Second rule handles authenticated access (may use get() calls).
+      // This ensures list queries with where("isPublic","==",true) never trigger get() chains.
+      allow read: if resource.data.isPublic == true;
+      allow read: if signedIn() && (
           isAdmin() ||
           isDojoOwner(dojoId) ||
           isMember(dojoId) ||
           isMyDojo(dojoId) ||
           isStaffOfDojoByUserDoc(dojoId) ||
           isStaffOfDojoByToken(dojoId)
-        ));
+        );
 
-      // ✅ CHANGED: signedIn() → verified(), dojoFieldsOk() 追加
       allow create: if verified() && isStaff() && dojoFieldsOk();
-      // ✅ CHANGED: signedIn() → verified(), dojoFieldsOk() 追加
       allow update: if verified() && isDojoStaff(dojoId) && dojoFieldsOk();
       allow delete: if isAdmin();
 
-      // ─────────────────────────────────────────────────────────────
-      // WAIVER TEMPLATES
-      // ─────────────────────────────────────────────────────────────
+      // ✅ FIX: meta subcollection for timetable update signals (students need read access)
+      match /meta/{docId} {
+        allow read: if signedIn() && (
+          isDojoStaff(dojoId) ||
+          isMember(dojoId) ||
+          isMyDojo(dojoId) ||
+          isAdmin()
+        );
+        allow create, update: if verified() && (isDojoStaff(dojoId) || isAdmin());
+        allow delete: if isAdmin();
+      }
+
       match /waiverTemplates/{templateId} {
-        // ✅ CHANGED: signedIn() → verified()
         allow read: if verified() && (isPublicDojo(dojoId) || canReadDojoContent(dojoId) || isAdmin());
-        // ✅ CHANGED: signedIn() → verified()
         allow create, update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
       }
 
-      // ─────────────────────────────────────────────────────────────
-      // WAIVER SUBMISSIONS
-      //
-      // ✅ NOTE: create は公開 dojo のビジター（未認証含む）も使うため
-      //          signedIn() のまま。verified() にすると visitor が使えなくなる。
-      // ─────────────────────────────────────────────────────────────
       match /waiverSubmissions/{submissionId} {
         allow get: if signedIn() && (
           isDojoStaff(dojoId) ||
@@ -568,15 +542,23 @@ service cloud.firestore {
           (resource.data.authUid == uid())
         );
 
-        allow list: if signedIn() && (isDojoStaff(dojoId) || isAdmin());
-
-        allow create: if signedIn() && (
-          isAdmin() ||
+        // ✅ FIX: Allow members to list their own waiver submissions.
+        // Client must use where("authUid","==",uid) for this to pass for non-staff.
+        allow list: if signedIn() && (
           isDojoStaff(dojoId) ||
-          isPublicDojo(dojoId)
+          isAdmin() ||
+          isMember(dojoId)
+        );
+
+        // ✅ FIX: Added isMember so logged-in students can submit waivers.
+        // Order: lightweight checks first to avoid unnecessary get() calls.
+        allow create: if signedIn() && (
+          isMember(dojoId) ||
+          isPublicDojo(dojoId) ||
+          isDojoStaff(dojoId) ||
+          isAdmin()
         ) && waiverSubmissionCreateOk(dojoId);
 
-        // ✅ CHANGED: signedIn() → verified()
         allow update: if verified() && (
           (isDojoStaff(dojoId) || isAdmin()) && waiverSubmissionStaffUpdateOk()
         );
@@ -584,20 +566,31 @@ service cloud.firestore {
         allow delete: if signedIn() && isAdmin();
       }
 
-      // ─────────────────────────────────────────────────────────────
-      // TIMETABLE CLASSES
-      // ─────────────────────────────────────────────────────────────
+      // ✅ FIX: waivers subcollection for visitor waiver signing page
+      // Visitors sign in anonymously and submit waivers to this collection.
+      match /waivers/{waiverId} {
+        allow read: if signedIn() && (
+          isDojoStaff(dojoId) ||
+          isAdmin() ||
+          (resource.data.uid == uid())
+        );
+
+        allow create: if signedIn() &&
+          request.resource.data.uid == uid() &&
+          ('fullName' in request.resource.data) &&
+          (request.resource.data.fullName is string) &&
+          (request.resource.data.fullName.size() > 0) &&
+          ('agreedToWaiver' in request.resource.data) &&
+          (request.resource.data.agreedToWaiver == true);
+
+        allow update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
+      }
+
       match /timetableClasses/{classId} {
         allow read: if canReadSchedule(dojoId);
-        // ✅ CHANGED: signedIn() → verified()
         allow create, update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
       }
 
-      // ─────────────────────────────────────────────────────────────
-      // MEMBERS
-      //
-      // ✅ CHANGED: 全 write に verified() + memberFieldsOk() を追加
-      // ─────────────────────────────────────────────────────────────
       match /members/{memberUid} {
         allow read: if signedIn() && (
           isDojoStaff(dojoId) ||
@@ -605,21 +598,18 @@ service cloud.firestore {
           isAdmin()
         );
 
-        // ✅ CHANGED: signedIn() → verified(), memberFieldsOk() 追加
         allow create: if verified() && (
           isDojoStaff(dojoId) ||
           isAdmin() ||
           (memberUid == uid() && userBelongsToDojo(dojoId))
         ) && memberFieldsOk();
 
-        // ✅ CHANGED: signedIn() → verified(), memberFieldsOk() 追加
         allow update: if verified() && (
           isDojoStaff(dojoId) ||
           memberUid == uid() ||
           isAdmin()
         ) && memberFieldsOk();
 
-        // ✅ CHANGED: signedIn() → verified()
         allow delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
 
         match /rankHistory/{historyId} {
@@ -628,7 +618,6 @@ service cloud.firestore {
             memberUid == uid() ||
             isAdmin()
           );
-          // ✅ CHANGED: signedIn() → verified()
           allow create, update: if verified() && (isDojoStaff(dojoId) || isAdmin());
           allow delete: if isAdmin();
         }
@@ -644,10 +633,8 @@ service cloud.firestore {
             (memberUid == uid() && memoVisibleToSelf())
           );
 
-          // ✅ CHANGED: signedIn() → verified()
           allow create, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
 
-          // ✅ CHANGED: signedIn() → verified()
           allow update: if verified() && (
             isDojoStaff(dojoId) ||
             isAdmin() ||
@@ -662,28 +649,23 @@ service cloud.firestore {
 
         match /noticeInbox/{noticeId} {
           allow read: if signedIn() && memberUid == uid();
-          // ✅ CHANGED: signedIn() → verified()
           allow create, update, delete: if verified() && (
             isDojoStaff(dojoId) || isAdmin()
           );
         }
       }
 
-      // ─────────────────────────────────────────────────────────────
-      // SESSIONS
-      // ─────────────────────────────────────────────────────────────
       match /sessions/{sessionId} {
         allow read: if canReadSchedule(dojoId);
 
-        // ✅ CHANGED: signedIn() → verified()
+        // ✅ FIX: Lightweight checks first to short-circuit before expensive isDojoStaff.
         allow create: if verified() && (
-          isDojoStaff(dojoId) ||
-          canReadDojoContent(dojoId) ||
           isMember(dojoId) ||
-          userBelongsToDojo(dojoId)
+          userBelongsToDojo(dojoId) ||
+          isDojoStaff(dojoId) ||
+          isAdmin()
         );
 
-        // ✅ CHANGED: signedIn() → verified()
         allow update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
 
         match /attendance/{attendanceId} {
@@ -692,23 +674,20 @@ service cloud.firestore {
             attendanceId == uid() ||
             isAdmin()
           );
-          // ✅ CHANGED: signedIn() → verified()
           allow create, update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
         }
 
-        // ─────────────────────────────────────────────────────────
-        // RESERVATIONS
-        // ─────────────────────────────────────────────────────────
+        // ✅ FIX: Simplified reservation rules to avoid exceeding get() call limit (10 max).
+        // Removed canReadDojoContent(dojoId) which triggers deep get() chains.
+        // Security is still enforced by: verified() + memberUid == uid() + reservationWriteOk().
         match /reservations/{memberUid} {
           allow read: if signedIn() && (
-            isDojoStaff(dojoId) ||
             memberUid == uid() ||
+            isDojoStaff(dojoId) ||
             isAdmin()
           );
 
-          // ✅ CHANGED: signedIn() → verified()
           allow create, update: if verified() &&
-            canReadDojoContent(dojoId) &&
             (
               memberUid == uid() ||
               isDojoStaff(dojoId) ||
@@ -716,7 +695,6 @@ service cloud.firestore {
             ) &&
             reservationWriteOk(dojoId, sessionId, memberUid);
 
-          // ✅ CHANGED: signedIn() → verified()
           allow delete: if verified() && (
             memberUid == uid() ||
             isDojoStaff(dojoId) ||
@@ -725,13 +703,6 @@ service cloud.firestore {
         }
       }
 
-      // ─────────────────────────────────────────────────────────────
-      // JOIN REQUESTS
-      //
-      // ✅ CHANGED: create に verified() を追加
-      // ⚠️ NOTE: email/password サインアップで登録直後に joinRequest を
-      //    作成するフローがある場合、メール認証後に作成するよう変更が必要
-      // ─────────────────────────────────────────────────────────────
       match /joinRequests/{requestUid} {
         allow read: if signedIn() && (
           isDojoStaff(dojoId) ||
@@ -739,10 +710,8 @@ service cloud.firestore {
           isAdmin()
         );
 
-        // ✅ CHANGED: signedIn() → verified()
         allow create: if verified() && requestUid == uid();
 
-        // ✅ CHANGED: signedIn() → verified()
         allow update, delete: if verified() && (
           requestUid == uid() ||
           isDojoStaff(dojoId) ||
@@ -750,9 +719,6 @@ service cloud.firestore {
         );
       }
 
-      // ─────────────────────────────────────────────────────────────
-      // DOJO NOTIFICATIONS
-      // ─────────────────────────────────────────────────────────────
       match /notifications/{notificationId} {
         allow read: if signedIn() && (
           isDojoStaff(dojoId) ||
@@ -761,15 +727,10 @@ service cloud.firestore {
           isAdmin()
         );
 
-        // ✅ CHANGED: signedIn() → verified()
         allow create, update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
       }
 
-      // ─────────────────────────────────────────────────────────────
-      // NOTICES
-      // ─────────────────────────────────────────────────────────────
       match /notices/{noticeId} {
-
         function noticeAudienceOk() {
           return !('audienceType' in resource.data) ||
             resource.data.audienceType == 'all' ||
@@ -813,16 +774,12 @@ service cloud.firestore {
           isAdmin()
         );
 
-        // ✅ CHANGED: signedIn() → verified()
         allow create, update, delete: if verified() && (
           isDojoStaff(dojoId) ||
           isAdmin()
         );
       }
 
-      // ─────────────────────────────────────────────────────────────
-      // ACTIVITY LOGS (Dojo)
-      // ─────────────────────────────────────────────────────────────
       match /activityLogs/{logId} {
         allow read: if signedIn() && (
           isDojoStaff(dojoId) ||
@@ -830,10 +787,37 @@ service cloud.firestore {
           isAdmin()
         );
 
-        // ✅ CHANGED: signedIn() → verified()
         allow create: if verified() && canReadDojoContent(dojoId);
-        // ✅ CHANGED: signedIn() → verified()
         allow update, delete: if verified() && (isDojoStaff(dojoId) || isAdmin());
+      }
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // PUBLIC DOJOS
+    // ✅ FIXED:
+    // publicDojos をコード側で読んだり meta/timetable を監視・更新しているため追加
+    // ───────────────────────────────────────────────────────────────
+    match /publicDojos/{dojoId} {
+      allow read: if true;
+
+      allow create, update: if verified() && (
+        isDojoStaff(dojoId) ||
+        isDojoOwner(dojoId) ||
+        isAdmin()
+      );
+
+      allow delete: if isAdmin();
+
+      match /meta/{docId} {
+        allow read: if true;
+
+        allow create, update: if verified() && (
+          isDojoStaff(dojoId) ||
+          isDojoOwner(dojoId) ||
+          isAdmin()
+        );
+
+        allow delete: if isAdmin();
       }
     }
 
@@ -846,7 +830,6 @@ service cloud.firestore {
         isAdmin()
       );
 
-      // ✅ CHANGED: signedIn() → verified()
       allow create: if verified();
 
       allow update, delete: if signedIn() && (
@@ -860,7 +843,6 @@ service cloud.firestore {
     // ───────────────────────────────────────────────────────────────
     match /activityLogs/{logId} {
       allow read: if signedIn();
-      // ✅ CHANGED: signedIn() → verified()
       allow create: if verified();
       allow update, delete: if isAdmin();
     }

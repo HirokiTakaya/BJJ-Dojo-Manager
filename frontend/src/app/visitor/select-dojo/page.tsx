@@ -10,8 +10,8 @@ import {
   firebaseDisabledReason,
 } from "@/firebase";
 
-import { signInAnonymously } from "firebase/auth";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 
 type DojoInfo = {
   id: string;
@@ -40,12 +40,57 @@ function VisitorSelectDojoContent() {
   const next = sp.get("next") || "/visitor/complete";
 
   const [loading, setLoading] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [dojos, setDojos] = useState<DojoInfo[]>([]);
   const [search, setSearch] = useState("");
 
+  // ✅ FIX: Check auth state first. If logged-in (non-anonymous) user,
+  // redirect to their dojo's waiver page instead of showing visitor flow.
+  // This prevents signInAnonymously from overwriting their session.
   useEffect(() => {
+    if (!authNullable) {
+      setAuthChecked(true);
+      return;
+    }
+
+    const unsub = onAuthStateChanged(authNullable, async (user) => {
+      if (user && !user.isAnonymous) {
+        // Logged-in user — find their dojoId and redirect
+        try {
+          const db = dbNullable;
+          if (db) {
+            const userSnap = await getDoc(doc(db, "users", user.uid));
+            if (userSnap.exists()) {
+              const ud = userSnap.data() as any;
+              const dojoId =
+                ud.dojoId ||
+                ud.staffProfile?.dojoId ||
+                ud.studentProfile?.dojoId ||
+                null;
+              if (dojoId) {
+                router.replace(`/dojos/${encodeURIComponent(dojoId)}/waiver`);
+                return;
+              }
+            }
+          }
+        } catch {
+          // If we can't find their dojo, just show the visitor page
+        }
+      }
+      setAuthChecked(true);
+    });
+
+    return () => unsub();
+  }, [router]);
+
+  // ✅ FIX: Only load dojos after auth check. If user is logged in, they'll be
+  // redirected before this runs. This prevents ensureGuestAuth() from being called
+  // for logged-in users (which would overwrite their session with anonymous).
+  useEffect(() => {
+    if (!authChecked) return; // Wait for auth check to complete
+
     let cancelled = false;
 
     const load = async () => {
@@ -58,6 +103,9 @@ function VisitorSelectDojoContent() {
         const db = dbNullable;
         if (!db) throw new Error("Firestore is not initialized.");
 
+        // ✅ FIX: Use dojos collection with isPublic filter.
+        // Firestore rules allow read when resource.data.isPublic == true,
+        // so this query works for anonymous users too.
         const q = query(collection(db, "dojos"), where("isPublic", "==", true));
         const snap = await getDocs(q);
 
@@ -88,7 +136,7 @@ function VisitorSelectDojoContent() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authChecked]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

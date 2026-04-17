@@ -1153,6 +1153,44 @@ func NewRouter(d RouterDeps) http.Handler {
 				}
 				WriteJSON(w, 200, map[string]any{"allowed": true})
 			})
+
+			// ★ Apply promo code
+			pr.Post("/v1/dojos/{dojoId}/promo-code", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+				dojoId := chi.URLParam(r, "dojoId")
+				if dojoId == "" {
+					Fail(w, 400, "missing dojoId")
+					return
+				}
+
+				// Only staff can apply promo codes
+				if !middleware.IsStaff(au.Claims) {
+					Fail(w, 403, "staff only")
+					return
+				}
+
+				var input struct {
+					Code string `json:"code"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+					Fail(w, 400, "invalid json")
+					return
+				}
+
+				if err := d.StripeSvc.ApplyPromoCode(r.Context(), dojoId, input.Code); err != nil {
+					if stripedom.IsErrBadRequest(err) {
+						WriteJSON(w, 400, map[string]any{"error": err.Error()})
+						return
+					}
+					Fail(w, 500, err.Error())
+					return
+				}
+
+				WriteJSON(w, 200, map[string]any{
+					"success": true,
+					"message": "Promo code applied! Your plan has been upgraded.",
+				})
+			})
 		}
 	})
 

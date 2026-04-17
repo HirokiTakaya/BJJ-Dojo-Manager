@@ -31,7 +31,7 @@ export type DojoSession = {
   startMinute: number; // 0..1439
   durationMinute: number;
 
-  // ✅ Added: instructor field
+  // null を許容して undefined は保存しない
   instructor?: string | null;
 
   /**
@@ -88,6 +88,27 @@ function normalizeStartMinute(startMinute: number) {
 function normalizeDurationMinute(durationMinute: number) {
   // 1..480 (8h) くらいで制限（必要なら変更OK）
   return clampInt(durationMinute, 1, 8 * 60);
+}
+
+/**
+ * undefined を Firestore に渡さないためのヘルパー
+ */
+function removeUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => value !== undefined)
+  ) as Partial<T>;
+}
+
+/**
+ * string | null に正規化する
+ * - undefined -> null
+ * - "" / "   " -> null
+ * - string -> trim 後の文字列
+ */
+function normalizeNullableString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const s = value.trim();
+  return s ? s : null;
 }
 
 export function toDateKey(d: Date) {
@@ -148,7 +169,6 @@ export type CreateSessionInput = {
   startMinute: number;
   durationMinute: number;
 
-  // ✅ Added: instructor field
   instructor?: string | null;
 
   dateKey: string;
@@ -161,7 +181,7 @@ export type CreateSessionInput = {
  * - docId を決定的にして重複作成を防ぐ
  */
 export async function getOrCreateSession(db: Firestore, input: CreateSessionInput) {
-  const dojoId = input.dojoId;
+  const dojoId = (input.dojoId ?? "").trim();
   const dateKey = (input.dateKey ?? "").trim();
   const timetableClassId = (input.timetableClassId ?? "").trim();
 
@@ -175,9 +195,7 @@ export async function getOrCreateSession(db: Firestore, input: CreateSessionInpu
   const weekday = normalizeWeekday(input.weekday);
   const startMinute = normalizeStartMinute(input.startMinute);
   const durationMinute = normalizeDurationMinute(input.durationMinute);
-
-  // ✅ Added: instructor
-  const instructor = (input.instructor ?? "").trim() || null;
+  const instructor = normalizeNullableString(input.instructor);
 
   const sessionId = makeSessionId(dateKey, timetableClassId);
   const ref = sessionDocRef(db, dojoId, sessionId);
@@ -190,23 +208,27 @@ export async function getOrCreateSession(db: Firestore, input: CreateSessionInpu
     } as DojoSession;
   }
 
-  const payload: Omit<DojoSession, "id"> = {
+  const payload = removeUndefined({
     dojoId,
     timetableClassId,
     title,
     weekday,
     startMinute,
     durationMinute,
-    instructor, // ✅ Added
+    instructor,
     dateKey,
     sortKey: computeSessionSortKey(dateKey, startMinute),
-    createdBy: input.createdBy ?? null,
+    createdBy: normalizeNullableString(input.createdBy),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  };
+  });
 
   await setDoc(ref, payload);
-  return { id: sessionId, ...payload } as DojoSession;
+
+  return {
+    id: sessionId,
+    ...(payload as Omit<DojoSession, "id">),
+  } as DojoSession;
 }
 
 /**
@@ -274,32 +296,44 @@ export async function updateSession(
 
   // 現在値も見て sortKey を正しく更新したい
   const curSnap = await getDoc(ref);
-  const cur = (curSnap.exists() ? (curSnap.data() as any) : {}) as any;
+  const cur = (curSnap.exists() ? (curSnap.data() as any) : {}) as Record<string, unknown>;
 
-  const next: any = { ...patch };
+  const next: Record<string, unknown> = { ...patch };
 
-  if (typeof next.title === "string") next.title = next.title.trim();
-
-  // ✅ Added: instructor handling
-  if (typeof next.instructor === "string") {
-    next.instructor = next.instructor.trim() || null;
+  if (typeof next.title === "string") {
+    next.title = next.title.trim();
   }
 
-  const dateKey = typeof next.dateKey === "string" ? next.dateKey.trim() : cur.dateKey ?? "";
+  if ("instructor" in next) {
+    next.instructor = normalizeNullableString(next.instructor);
+  }
+
+  if ("createdBy" in next) {
+    next.createdBy = normalizeNullableString(next.createdBy);
+  }
+
+  const dateKey =
+    typeof next.dateKey === "string"
+      ? next.dateKey.trim()
+      : typeof cur.dateKey === "string"
+      ? cur.dateKey
+      : "";
+
   const weekday =
     typeof next.weekday === "number"
       ? normalizeWeekday(next.weekday)
-      : normalizeWeekday(cur.weekday ?? 0);
+      : normalizeWeekday(typeof cur.weekday === "number" ? cur.weekday : 0);
 
   const startMinute =
     typeof next.startMinute === "number"
       ? normalizeStartMinute(next.startMinute)
-      : normalizeStartMinute(cur.startMinute ?? 0);
+      : normalizeStartMinute(typeof cur.startMinute === "number" ? cur.startMinute : 0);
 
   if (typeof next.weekday === "number") next.weekday = weekday;
   if (typeof next.startMinute === "number") next.startMinute = startMinute;
-  if (typeof next.durationMinute === "number")
+  if (typeof next.durationMinute === "number") {
     next.durationMinute = normalizeDurationMinute(next.durationMinute);
+  }
 
   // dateKey も更新されるなら、形式チェック
   if (typeof next.dateKey === "string") {
@@ -312,10 +346,12 @@ export async function updateSession(
     next.sortKey = computeSessionSortKey(dateKey, startMinute);
   }
 
-  await updateDoc(ref, {
+  const safePatch = removeUndefined({
     ...next,
     updatedAt: serverTimestamp(),
   });
+
+  await updateDoc(ref, safePatch);
 }
 
 /**
@@ -358,15 +394,15 @@ export async function markAttendance(
 
   const ref = attendanceDocRef(db, dojoId, sessionId, studentId);
 
-  const payload: Omit<AttendanceMark, "id"> = {
+  const payload = removeUndefined({
     studentId,
     present: !!input.present,
-    checkedBy: input.checkedBy ?? null,
-    note: (input.note ?? "").trim() || null,
+    checkedBy: normalizeNullableString(input.checkedBy),
+    note: normalizeNullableString(input.note),
     checkedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     createdAt: serverTimestamp(), // merge:true なので初回だけ意味がある
-  };
+  });
 
   await setDoc(ref, payload, { merge: true });
 }
@@ -396,7 +432,7 @@ export function buildSessionIdForClass(dateKey: string, timetableClassId: string
 }
 
 /**
- * ✅ Timetable 側で使う class の最小形
+ * Timetable 側で使う class の最小形
  */
 export type TimetableClassLike = {
   id: string;
@@ -404,11 +440,11 @@ export type TimetableClassLike = {
   weekday: number;
   startMinute: number;
   durationMinute: number;
-  instructor?: string | null; // ✅ Added
+  instructor?: string | null;
 };
 
 /**
- * ✅ TimetableClient が期待する返り値（{ sessionId }）
+ * TimetableClient が期待する返り値（{ sessionId }）
  */
 export type EnsureSessionResult = {
   sessionId: string;
@@ -416,24 +452,17 @@ export type EnsureSessionResult = {
 };
 
 /**
- * ✅ 互換用 ensureSession
- *
- * 既存のロジックを壊さないために「3パターン」対応します:
+ * 互換用 ensureSession
  *
  * A) ensureSession(db, input: CreateSessionInput) -> DojoSession
- *    （あなたが書いていたパターン。既存維持）
- *
  * B) ensureSession(db, dojoId, dateKey, cls, createdBy?) -> DojoSession
- *    （あなたが書いていた "旧 Pattern B"。既存維持）
- *
  * C) ensureSession(db, dojoId, cls, dateOrDateKey, createdBy?) -> { sessionId, session }
- *    （TimetableClient.tsx が期待してる形）
  */
 
 // A
 export function ensureSession(db: Firestore, input: CreateSessionInput): Promise<DojoSession>;
 
-// B（旧）
+// B
 export function ensureSession(
   db: Firestore,
   dojoId: string,
@@ -442,7 +471,7 @@ export function ensureSession(
   createdBy?: string | null
 ): Promise<DojoSession>;
 
-// C（TimetableClient 用：db, dojoId, klass, Date）
+// C
 export function ensureSession(
   db: Firestore,
   dojoId: string,
@@ -451,7 +480,7 @@ export function ensureSession(
   createdBy?: string | null
 ): Promise<EnsureSessionResult>;
 
-// C（TimetableClient 用：db, dojoId, klass, dateKey）
+// C
 export function ensureSession(
   db: Firestore,
   dojoId: string,
@@ -470,17 +499,20 @@ export async function ensureSession(
 ): Promise<DojoSession | EnsureSessionResult> {
   // Pattern A: ensureSession(db, input)
   if (typeof a !== "string") {
-    return getOrCreateSession(db, a);
+    return getOrCreateSession(db, {
+      ...a,
+      instructor: normalizeNullableString(a.instructor),
+      createdBy: normalizeNullableString(a.createdBy),
+    });
   }
 
   const dojoId = a;
 
-  // Pattern B（旧）: ensureSession(db, dojoId, dateKey, cls, createdBy?)
-  // → 第2引数が string の場合は dateKey とみなす
+  // Pattern B: ensureSession(db, dojoId, dateKey, cls, createdBy?)
   if (typeof b === "string") {
     const dateKey = b.trim();
     const cls = c as TimetableClassLike | undefined;
-    const createdBy = (d ?? null) as string | null;
+    const createdBy = normalizeNullableString(d);
 
     if (!dojoId) throw new Error("dojoId is required.");
     if (!isValidDateKey(dateKey)) throw new Error("dateKey must be YYYY-MM-DD.");
@@ -494,15 +526,15 @@ export async function ensureSession(
       weekday: cls.weekday,
       startMinute: cls.startMinute,
       durationMinute: cls.durationMinute,
-      instructor: cls.instructor ?? null, // ✅ Added
+      instructor: normalizeNullableString(cls.instructor),
       createdBy,
     });
   }
 
-  // Pattern C（TimetableClient）: ensureSession(db, dojoId, cls, dateOrDateKey, createdBy?)
+  // Pattern C: ensureSession(db, dojoId, cls, dateOrDateKey, createdBy?)
   const cls = b as TimetableClassLike | undefined;
   const dateOrDateKey = c as Date | string | undefined;
-  const createdBy = (typeof d === "string" ? d : d ?? null) as string | null;
+  const createdBy = normalizeNullableString(d);
 
   if (!dojoId) throw new Error("dojoId is required.");
   if (!cls?.id) throw new Error("timetable class is required.");
@@ -521,10 +553,9 @@ export async function ensureSession(
     weekday: cls.weekday,
     startMinute: cls.startMinute,
     durationMinute: cls.durationMinute,
-    instructor: cls.instructor ?? null, // ✅ Added
+    instructor: normalizeNullableString(cls.instructor),
     createdBy,
   });
 
-  // ✅ TimetableClient が欲しい { sessionId } を返す
   return { sessionId: session.id, session };
 }
