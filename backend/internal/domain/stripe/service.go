@@ -87,7 +87,20 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, userUID string, inp
 		email, _ = userDoc.Data()["email"].(string)
 	}
 
-	if stripeCustomerID == "" {
+	// Verify existing customer ID is valid in current Stripe mode (test vs live).
+	// If the stored customer was created in a different mode, Stripe returns
+	// "No such customer" — in that case, recreate it transparently.
+	customerValid := false
+	if stripeCustomerID != "" {
+		if _, err := customer.Get(stripeCustomerID, nil); err == nil {
+			customerValid = true
+		} else {
+			log.Printf("stored customer %s not valid in current Stripe mode, recreating: %v", stripeCustomerID, err)
+			stripeCustomerID = ""
+		}
+	}
+
+	if !customerValid {
 		params := &stripe.CustomerParams{
 			Email: stripe.String(email),
 			Name:  stripe.String(dojoName),
@@ -177,6 +190,13 @@ func (s *Service) CreatePortalSession(ctx context.Context, userUID string, input
 
 	if stripeCustomerID == "" {
 		return "", fmt.Errorf("%w: no billing account found", ErrBadRequest)
+	}
+
+	// Verify the customer exists in current Stripe mode. If not, surface a
+	// clear error so the user goes through Checkout first (which will recreate).
+	if _, err := customer.Get(stripeCustomerID, nil); err != nil {
+		log.Printf("portal: stored customer %s not valid in current Stripe mode: %v", stripeCustomerID, err)
+		return "", fmt.Errorf("%w: billing account is not available in the current environment. Please start a new subscription first.", ErrBadRequest)
 	}
 
 	params := &stripe.BillingPortalSessionParams{
@@ -405,9 +425,9 @@ func (s *Service) ApplyPromoCode(ctx context.Context, dojoID, code string) error
 
 	// Apply planOverride to the dojo
 	_, err = s.fs.Collection("dojos").Doc(dojoID).Set(ctx, map[string]interface{}{
-		"planOverride":    grantPlan,
-		"promoCode":       code,
-		"promoAppliedAt":  time.Now().UTC(),
+		"planOverride":   grantPlan,
+		"promoCode":      code,
+		"promoAppliedAt": time.Now().UTC(),
 	}, firestore.MergeAll)
 	if err != nil {
 		return fmt.Errorf("failed to apply promo code: %w", err)
