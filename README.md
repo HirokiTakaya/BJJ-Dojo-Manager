@@ -105,8 +105,3 @@ Hiroki Takaya
 GitHub: https://github.com/HirokiTakaya
 
 
----
-
-BJJ Dojo Manager is a full-stack SaaS-style web application for managing dojo operations, built with Next.js, TypeScript, Go, and Firebase.
-
-It includes authentication, role-based access control, member management, scheduling, and communication features. The goal of the project was to build a practical, production-oriented tool that solves real workflow problems for martial arts academies.
