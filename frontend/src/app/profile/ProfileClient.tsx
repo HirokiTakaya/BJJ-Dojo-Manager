@@ -2,11 +2,11 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import { auth, db } from "@/firebase";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { useDojoName } from "@/hooks/useDojoName";
-import { resolveIsStaff, type UserDocBase } from "@/lib/roles";
 import Navigation, { BottomNavigation } from "@/components/Navigation";
 
 // ─────────────────────────────────────────────
@@ -35,31 +35,31 @@ type MemberProfile = {
 };
 
 // ─────────────────────────────────────────────
-// Belt Config
+// Belt Config (label is now a translation key, not a literal)
 // ─────────────────────────────────────────────
 
 const ADULT_BELTS = [
-  { value: "white", label: "White", color: "#E5E7EB" },
-  { value: "blue", label: "Blue", color: "#2563EB" },
-  { value: "purple", label: "Purple", color: "#7C3AED" },
-  { value: "brown", label: "Brown", color: "#92400E" },
-  { value: "black", label: "Black", color: "#1F2937" },
+  { value: "white", color: "#E5E7EB" },
+  { value: "blue", color: "#2563EB" },
+  { value: "purple", color: "#7C3AED" },
+  { value: "brown", color: "#92400E" },
+  { value: "black", color: "#1F2937" },
 ];
 
 const KIDS_BELTS = [
-  { value: "white", label: "White", color: "#E5E7EB" },
-  { value: "grey-white", label: "Grey/White", color: "#9CA3AF" },
-  { value: "grey", label: "Grey", color: "#6B7280" },
-  { value: "grey-black", label: "Grey/Black", color: "#4B5563" },
-  { value: "yellow-white", label: "Yellow/White", color: "#FDE047" },
-  { value: "yellow", label: "Yellow", color: "#FACC15" },
-  { value: "yellow-black", label: "Yellow/Black", color: "#EAB308" },
-  { value: "orange-white", label: "Orange/White", color: "#FDBA74" },
-  { value: "orange", label: "Orange", color: "#F97316" },
-  { value: "orange-black", label: "Orange/Black", color: "#EA580C" },
-  { value: "green-white", label: "Green/White", color: "#86EFAC" },
-  { value: "green", label: "Green", color: "#22C55E" },
-  { value: "green-black", label: "Green/Black", color: "#16A34A" },
+  { value: "white", color: "#E5E7EB" },
+  { value: "grey-white", color: "#9CA3AF" },
+  { value: "grey", color: "#6B7280" },
+  { value: "grey-black", color: "#4B5563" },
+  { value: "yellow-white", color: "#FDE047" },
+  { value: "yellow", color: "#FACC15" },
+  { value: "yellow-black", color: "#EAB308" },
+  { value: "orange-white", color: "#FDBA74" },
+  { value: "orange", color: "#F97316" },
+  { value: "orange-black", color: "#EA580C" },
+  { value: "green-white", color: "#86EFAC" },
+  { value: "green", color: "#22C55E" },
+  { value: "green-black", color: "#16A34A" },
 ];
 
 const STRIPE_OPTIONS = [0, 1, 2, 3, 4];
@@ -71,15 +71,16 @@ const STRIPE_OPTIONS = [0, 1, 2, 3, 4];
 export default function ProfileClient() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const t = useTranslations("profile");
+  const tBelt = useTranslations("beltProgression.belts");
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [memberProfile, setMemberProfile] = useState<MemberProfile | null>(null);
+  const [_memberProfile, setMemberProfile] = useState<MemberProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // Form state
   const [displayName, setDisplayName] = useState("");
   const [beltRank, setBeltRank] = useState("white");
   const [stripes, setStripes] = useState(0);
@@ -88,7 +89,6 @@ export default function ProfileClient() {
   const [emergencyPhone, setEmergencyPhone] = useState("");
   const [notes, setNotes] = useState("");
 
-  // Derived
   const dojoId = userProfile?.dojoId || userProfile?.staffProfile?.dojoId || userProfile?.studentProfile?.dojoId || "";
   const { dojoName } = useDojoName(dojoId);
 
@@ -101,12 +101,19 @@ export default function ProfileClient() {
     userProfile?.role === "admin"
   );
 
-  // Auth gate
+  // Helper: safely translate a belt key, fall back to the raw value if missing
+  const beltLabel = (val: string) => {
+    try {
+      return tBelt(val as any);
+    } catch {
+      return val;
+    }
+  };
+
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
   }, [authLoading, user, router]);
 
-  // Load profile
   useEffect(() => {
     if (!user) return;
 
@@ -144,16 +151,15 @@ export default function ProfileClient() {
           setDisplayName(user.email || "");
         }
       } catch (e: any) {
-        setError(e?.message || "Failed to load profile.");
+        setError(e?.message || t("errors.loadFailed"));
       } finally {
         setLoading(false);
       }
     };
 
     load();
-  }, [user]);
+  }, [user, t]);
 
-  // Save profile
   const handleSave = async () => {
     if (!user) return;
     setSaving(true);
@@ -187,16 +193,15 @@ export default function ProfileClient() {
         await setDoc(doc(db, "dojos", dojoId, "members", user.uid), memberPatch, { merge: true });
       }
 
-      setSuccess("Profile saved!");
+      setSuccess(t("savedToast"));
       setTimeout(() => setSuccess(""), 3000);
     } catch (e: any) {
-      setError(e?.message || "Failed to save.");
+      setError(e?.message || t("errors.saveFailed"));
     } finally {
       setSaving(false);
     }
   };
 
-  // Belt options
   const beltOptions = isKids ? KIDS_BELTS : ADULT_BELTS;
 
   useEffect(() => {
@@ -205,10 +210,6 @@ export default function ProfileClient() {
   }, [isKids, beltOptions, beltRank]);
 
   const currentBeltColor = [...ADULT_BELTS, ...KIDS_BELTS].find((b) => b.value === beltRank)?.color || "#E5E7EB";
-
-  // ─────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────
 
   if (authLoading || loading) {
     return (
@@ -237,9 +238,9 @@ export default function ProfileClient() {
             <div>
               <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 text-sm mb-3">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-                Back
+                {t("back")}
               </button>
-              <h1 className="text-2xl font-bold text-gray-900">My Profile</h1>
+              <h1 className="text-2xl font-bold text-gray-900">{t("title")}</h1>
               <div className="flex flex-wrap items-center gap-2 mt-2">
                 <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm font-medium">
                   ✉️ {user.email}
@@ -255,7 +256,7 @@ export default function ProfileClient() {
               onClick={async () => { await auth.signOut(); router.replace("/login"); }}
               className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
             >
-              Sign Out
+              {t("signOut")}
             </button>
           </div>
         </div>
@@ -266,14 +267,14 @@ export default function ProfileClient() {
 
         {/* Basic Info */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 space-y-5">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Basic Information</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">{t("basicInformation")}</h2>
 
           {/* Display Name */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Display Name *</label>
-            <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Your name"
+            <label className="block text-sm font-medium text-gray-700 mb-1">{t("displayNameRequired")}</label>
+            <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={t("displayNamePlaceholder")}
               className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <p className="text-xs text-gray-400 mt-1">Displayed to instructors and other members.</p>
+            <p className="text-xs text-gray-400 mt-1">{t("displayNameHelp")}</p>
           </div>
 
           {/* Kids Toggle */}
@@ -288,25 +289,25 @@ export default function ProfileClient() {
                 <div className={`h-5 w-5 rounded-full bg-white border transition-transform ${isKids ? "translate-x-5 border-white" : "translate-x-0.5 border-gray-300"}`} />
               </div>
             )}
-            <span className="text-sm font-medium text-gray-700">Kids Program</span>
-            {isKids && <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">Kids</span>}
-            {!isStaff && <span className="text-xs text-gray-400">(Managed by staff)</span>}
+            <span className="text-sm font-medium text-gray-700">{t("kidsProgram")}</span>
+            {isKids && <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">{t("kidsTag")}</span>}
+            {!isStaff && <span className="text-xs text-gray-400">{t("managedByStaff")}</span>}
           </div>
 
           {/* Belt Rank */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Belt Rank</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{t("beltRankLabel")}</label>
             <div className="flex items-center gap-3">
               <div className="w-16 h-4 rounded-sm" style={{ backgroundColor: currentBeltColor, border: "1px solid #D1D5DB" }} />
               {isStaff ? (
                 <select value={beltRank} onChange={(e) => setBeltRank(e.target.value)}
                   className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  {beltOptions.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
+                  {beltOptions.map((b) => <option key={b.value} value={b.value}>{beltLabel(b.value)}</option>)}
                 </select>
               ) : (
                 <>
-                  <span className="text-sm font-medium text-gray-900">{beltOptions.find((b) => b.value === beltRank)?.label || "White"}</span>
-                  <span className="text-xs text-gray-400">(Managed by staff)</span>
+                  <span className="text-sm font-medium text-gray-900">{beltLabel(beltRank)}</span>
+                  <span className="text-xs text-gray-400">{t("managedByStaff")}</span>
                 </>
               )}
             </div>
@@ -314,7 +315,7 @@ export default function ProfileClient() {
 
           {/* Stripes */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Stripes</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">{t("stripesLabel")}</label>
             <div className="flex items-center gap-2">
               {STRIPE_OPTIONS.map((n) => (
                 isStaff ? (
@@ -333,29 +334,29 @@ export default function ProfileClient() {
                   <div key={i} className="h-4 w-1.5 rounded-sm bg-white border border-gray-400" />
                 ))}
               </div>
-              {!isStaff && <span className="text-xs text-gray-400 ml-2">(Managed by staff)</span>}
+              {!isStaff && <span className="text-xs text-gray-400 ml-2">{t("managedByStaff")}</span>}
             </div>
           </div>
         </div>
 
         {/* Emergency Contact */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 space-y-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Emergency Contact</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">{t("emergencyContact")}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Contact Name</label>
-              <input type="text" value={emergencyContact} onChange={(e) => setEmergencyContact(e.target.value)} placeholder="e.g. Parent, Guardian"
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t("emergencyContactName")}</label>
+              <input type="text" value={emergencyContact} onChange={(e) => setEmergencyContact(e.target.value)} placeholder={t("emergencyContactPlaceholder")}
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
-              <input type="tel" value={emergencyPhone} onChange={(e) => setEmergencyPhone(e.target.value)} placeholder="e.g. 123-456-7890"
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t("emergencyContactPhone")}</label>
+              <input type="tel" value={emergencyPhone} onChange={(e) => setEmergencyPhone(e.target.value)} placeholder={t("emergencyPhonePlaceholder")}
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes / Medical Info</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Allergies, medical conditions, etc."
+            <label className="block text-sm font-medium text-gray-700 mb-1">{t("notesLabel")}</label>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder={t("notesPlaceholder")}
               className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
           </div>
         </div>
@@ -364,11 +365,11 @@ export default function ProfileClient() {
         <div className="flex justify-end gap-3">
           <button onClick={() => router.back()} disabled={saving}
             className="px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition disabled:opacity-50">
-            Cancel
+            {t("cancel")}
           </button>
           <button onClick={handleSave} disabled={saving || !displayName.trim()}
             className="px-4 py-2.5 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50">
-            {saving ? "Saving..." : "Save Profile"}
+            {saving ? t("saving") : t("saveProfile")}
           </button>
         </div>
       </main>

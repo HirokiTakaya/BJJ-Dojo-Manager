@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { sendPasswordResetEmail } from "firebase/auth";
+import { useTranslations } from "next-intl";
 import { auth } from "@/firebase";
 
 const LOGO_SRC = "/assets/jiujitsu-samurai-Logo.png";
@@ -11,6 +12,8 @@ export default function ForgotPasswordClient() {
   const router = useRouter();
   const sp = useSearchParams();
   const initialEmail = useMemo(() => sp.get("email") || "", [sp]);
+  const t = useTranslations("forgotPassword");
+  const tCommon = useTranslations("common");
 
   const [email, setEmail] = useState(initialEmail);
   const [loading, setLoading] = useState(false);
@@ -18,15 +21,21 @@ export default function ForgotPasswordClient() {
 
   const handleSend = async () => {
     if (!email) {
-      setToastMsg("Please enter your email address.");
+      setToastMsg(t("errors.invalidEmail"));
       return;
     }
     setLoading(true);
     try {
       await sendPasswordResetEmail(auth, email.trim());
-      setToastMsg("We have sent a password reset email. Please check your inbox.");
+      setToastMsg(t("sentBody"));
     } catch (e: any) {
-      setToastMsg(e?.message || "Failed to send the reset email.");
+      if (e?.code === "auth/user-not-found") {
+        setToastMsg(t("errors.userNotFound"));
+      } else if (e?.code === "auth/invalid-email") {
+        setToastMsg(t("errors.invalidEmail"));
+      } else {
+        setToastMsg(t("errors.generic"));
+      }
     } finally {
       setLoading(false);
     }
@@ -37,18 +46,19 @@ export default function ForgotPasswordClient() {
       <div style={{ maxWidth: 420, margin: "0 auto", paddingTop: 30 }}>
         <img
           src={LOGO_SRC}
-          alt="Logo"
+          alt={tCommon("appName")}
           style={{ width: 64, height: 64, display: "block", margin: "0 auto 14px" }}
         />
-        <h2 style={{ textAlign: "center" }}>Reset Password</h2>
+        <h2 style={{ textAlign: "center" }}>{t("title")}</h2>
 
         <p style={{ textAlign: "center", marginTop: 8, opacity: 0.9 }}>
-          Enter your registered email address and we will send you a link to reset your password.
+          {t("subtitle")}
         </p>
 
         <input
           type="email"
-          placeholder="Email"
+          placeholder={t("emailPlaceholder")}
+          aria-label={t("emailLabel")}
           value={email}
           onChange={(e) => setEmail(e.target.value ?? "")}
           style={{
@@ -77,7 +87,7 @@ export default function ForgotPasswordClient() {
             cursor: "pointer",
           }}
         >
-          {loading ? "Sending…" : "Send Reset Password Link"}
+          {loading ? tCommon("submitting") : t("submit")}
         </button>
 
         <div style={{ marginTop: 14, textAlign: "center" }}>
@@ -85,7 +95,7 @@ export default function ForgotPasswordClient() {
             onClick={() => router.replace("/login")}
             style={{ background: "transparent", border: 0, color: "#b2d3db", cursor: "pointer" }}
           >
-            Back to Login
+            {t("backToLogin")}
           </button>
         </div>
       </div>
@@ -108,7 +118,7 @@ export default function ForgotPasswordClient() {
               onClick={() => setToastMsg("")}
               style={{ background: "transparent", border: 0, color: "#b2d3db", cursor: "pointer" }}
             >
-              Close
+              {tCommon("close")}
             </button>
           </div>
         </div>

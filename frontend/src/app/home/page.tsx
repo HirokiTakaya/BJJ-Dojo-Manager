@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import { auth, db } from "@/firebase";
 import { useDojoName } from "@/hooks/useDojoName";
@@ -15,6 +16,7 @@ import { doc, getDoc } from "firebase/firestore";
 export default function HomePage() {
   const router = useRouter();
   const { user, loading } = useAuth();
+  const t = useTranslations("home");
 
   const [userDoc, setUserDoc] = useState<UserDocBase | null>(null);
   const [profileBusy, setProfileBusy] = useState(false);
@@ -28,7 +30,7 @@ export default function HomePage() {
     }
 
     if (!db) {
-      setProfileErr("Firebase is not ready.");
+      setProfileErr(t("errorLoadProfile"));
       return;
     }
 
@@ -42,9 +44,9 @@ export default function HomePage() {
           setUserDoc(snap.exists() ? (snap.data() as UserDocBase) : null);
         }
       })
-      .catch((e: Error) => {
+      .catch(() => {
         if (mounted) {
-          setProfileErr(e?.message || "Failed to load profile.");
+          setProfileErr(t("errorLoadProfile"));
         }
       })
       .finally(() => {
@@ -54,7 +56,7 @@ export default function HomePage() {
     return () => {
       mounted = false;
     };
-  }, [user]);
+  }, [user, t]);
 
   // Computed values
   const dojoId = useMemo(() => resolveDojoId(userDoc), [userDoc]);
@@ -62,7 +64,7 @@ export default function HomePage() {
   const isStaff = useMemo(() => resolveIsStaff(userDoc), [userDoc]);
   const isStudent = useMemo(() => userDoc && !isStaff, [userDoc, isStaff]);
 
-  // ★ Waiver status check (students only)
+  // Waiver status check (students only)
   const { loading: waiverLoading, signed: waiverSigned } = useWaiverStatus(
     isStudent ? dojoId : null,
     user?.uid
@@ -125,14 +127,17 @@ export default function HomePage() {
     return null;
   }
 
-  const roleLabel = isStaff ? "Staff" : isStudent ? "Member" : "User";
+  const roleLabel = isStaff
+    ? t("roleStaff")
+    : isStudent
+    ? t("roleMember")
+    : t("roleUser");
 
-  const roleBadgeClass =
-    roleLabel === "Staff"
-      ? "bg-purple-100 text-purple-800"
-      : roleLabel === "Member"
-      ? "bg-blue-100 text-blue-800"
-      : "bg-gray-100 text-gray-700";
+  const roleBadgeClass = isStaff
+    ? "bg-purple-100 text-purple-800"
+    : isStudent
+    ? "bg-blue-100 text-blue-800"
+    : "bg-gray-100 text-gray-700";
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -145,13 +150,16 @@ export default function HomePage() {
                 <p className="text-sm font-medium text-blue-600 mb-1">{dojoName}</p>
               )}
               <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-2xl font-bold text-gray-900">Home</h1>
+                <h1 className="text-2xl font-bold text-gray-900">{t("headerTitle")}</h1>
                 <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${roleBadgeClass}`}>
                   {roleLabel}
                 </span>
               </div>
               <p className="text-sm text-gray-500">
-                Signed in as <span className="font-medium text-gray-900">{user.email ?? "Anonymous"}</span>
+                {t("signedInAs")}{" "}
+                <span className="font-medium text-gray-900">
+                  {user.email ?? t("signedInAnonymous")}
+                </span>
               </p>
             </div>
 
@@ -159,12 +167,12 @@ export default function HomePage() {
               onClick={handleSignOut}
               className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition"
             >
-              Sign out
+              {t("signOut")}
             </button>
           </div>
         </div>
 
-        {/* ★ Waiver unsigned banner (students only) */}
+        {/* Waiver unsigned banner (students only) */}
         {isStudent && dojoId && !waiverLoading && !waiverSigned && (
           <button
             onClick={gotoWaiver}
@@ -174,12 +182,8 @@ export default function HomePage() {
               <span className="text-2xl">📝</span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-amber-900">
-                Waiver not signed yet
-              </p>
-              <p className="text-sm text-amber-700 mt-0.5">
-                Please sign the liability waiver before joining class.
-              </p>
+              <p className="font-semibold text-amber-900">{t("waiverNotSigned")}</p>
+              <p className="text-sm text-amber-700 mt-0.5">{t("waiverNotSignedDesc")}</p>
             </div>
             <svg
               className="w-5 h-5 text-amber-500 group-hover:text-amber-700 group-hover:translate-x-0.5 transition flex-shrink-0"
@@ -211,8 +215,10 @@ export default function HomePage() {
         {isStaff && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
             <div className="mb-4">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Staff Menu</h2>
-              <p className="text-sm text-gray-400 mt-1">Manage your dojo operations</p>
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                {t("staffMenu")}
+              </h2>
+              <p className="text-sm text-gray-400 mt-1">{t("staffMenuDesc")}</p>
             </div>
 
             <div className="space-y-3">
@@ -221,34 +227,34 @@ export default function HomePage() {
                   <MenuButton
                     onClick={gotoTimetable}
                     icon="📅"
-                    title="Class Schedule"
-                    description="Build timetable, manage sessions and attendance"
+                    title={t("menuClassSchedule")}
+                    description={t("menuClassScheduleStaffDesc")}
                   />
                   <MenuButton
                     onClick={gotoMembers}
                     icon="👥"
-                    title="Members"
-                    description="View and manage dojo members"
+                    title={t("menuMembers")}
+                    description={t("menuMembersDesc")}
                   />
                   <MenuButton
                     onClick={gotoStaffNotices}
                     icon="📣"
-                    title="Announcements"
-                    description="Send updates and announcements to members"
+                    title={t("menuAnnouncements")}
+                    description={t("menuAnnouncementsDesc")}
                   />
                   <MenuButton
                     onClick={gotoBilling}
                     icon="💳"
-                    title="Billing & Plans"
-                    description="Manage your subscription and payments"
+                    title={t("menuBilling")}
+                    description={t("menuBillingDesc")}
                   />
                 </>
               ) : (
                 <MenuButton
                   onClick={gotoStaffSignup}
                   icon="🏢"
-                  title="Create or Select a Dojo"
-                  description="Set up your dojo to get started"
+                  title={t("menuCreateDojo")}
+                  description={t("menuCreateDojoDesc")}
                 />
               )}
             </div>
@@ -259,8 +265,10 @@ export default function HomePage() {
         {isStudent && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
             <div className="mb-4">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Member Menu</h2>
-              <p className="text-sm text-gray-400 mt-1">Check schedules and updates</p>
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                {t("memberMenu")}
+              </h2>
+              <p className="text-sm text-gray-400 mt-1">{t("memberMenuDesc")}</p>
             </div>
 
             <div className="space-y-3">
@@ -269,22 +277,22 @@ export default function HomePage() {
                   <MenuButton
                     onClick={gotoTimetable}
                     icon="📅"
-                    title="Class Schedule"
-                    description="View classes and make reservations"
+                    title={t("menuClassSchedule")}
+                    description={t("menuClassScheduleStudentDesc")}
                   />
                   <MenuButton
                     onClick={gotoStudentInbox}
                     icon="✉️"
-                    title="Inbox"
-                    description="View announcements and important messages"
+                    title={t("menuInbox")}
+                    description={t("menuInboxDesc")}
                   />
                 </>
               ) : (
                 <MenuButton
                   onClick={gotoStudentSignup}
                   icon="🥋"
-                  title="Join a Dojo"
-                  description="Search and join a dojo to view class schedules"
+                  title={t("menuJoinDojo")}
+                  description={t("menuJoinDojoDesc")}
                 />
               )}
             </div>
@@ -294,7 +302,7 @@ export default function HomePage() {
         {/* No profile state */}
         {!isStaff && !isStudent && !profileBusy && userDoc === null && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 text-center text-gray-500">
-            No profile found. Please complete your registration.
+            {t("noProfile")}
           </div>
         )}
       </main>

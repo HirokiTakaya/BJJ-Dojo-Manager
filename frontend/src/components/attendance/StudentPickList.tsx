@@ -1,19 +1,22 @@
 "use client";
 
 import React from "react";
+import { useTranslations } from "next-intl";
 import type { StudentLite } from "@/lib/students";
 
 export function StudentPickList({
   students,
   renderRight,
-  emptyLabel = "No students found.",
+  emptyLabel,
 }: {
   students: StudentLite[];
   renderRight?: (s: StudentLite) => React.ReactNode;
   emptyLabel?: string;
 }) {
+  const t = useTranslations("members");
+  const effectiveEmptyLabel = emptyLabel ?? t("noResults");
   if (!students.length) {
-    return <div style={{ opacity: 0.7, marginTop: 10 }}>{emptyLabel}</div>;
+    return <div style={{ opacity: 0.7, marginTop: 10 }}>{effectiveEmptyLabel}</div>;
   }
 
   return (
@@ -38,7 +41,7 @@ export function StudentPickList({
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 800 }}>{s.displayName || "(no name)"}</div>
+            <div style={{ fontWeight: 800 }}>{s.displayName || "—"}</div>
             <div style={{ fontSize: 12, opacity: 0.75 }}>
               {s.email || ""} <span style={{ opacity: 0.5 }}>uid: {s.uid}</span>
             </div>

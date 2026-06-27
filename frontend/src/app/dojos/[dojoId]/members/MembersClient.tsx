@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 // ✅ FIX: Added missing imports for useRouter, useParams, useSearchParams
 import { useRouter, useParams, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import Navigation, { BottomNavigation } from "@/components/Navigation";
 import { useDojoName } from "@/hooks/useDojoName";
@@ -107,7 +108,7 @@ async function createMemberApi(data: {
   roleInDojo: string;
 }): Promise<CreateMemberResponse> {
   const user = auth.currentUser;
-  if (!user) throw new Error("Not authenticated");
+  if (!user) throw new Error(t("errors.notAuthenticated"));
 
   const token = await user.getIdToken(true);
 
@@ -152,6 +153,15 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
   const params = useParams();
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
+  const t = useTranslations("members");
+
+  // Translated role labels (safer than the global const which was English-only)
+  const roleLabels: Record<string, string> = {
+    owner: t("roleOwner"),
+    staff: t("roleStaff"),
+    coach: t("roleCoach"),
+    student: t("roleStudent"),
+  };
 
   const dojoId = useMemo(() => {
     const fromProps = (props?.dojoId || "").trim();
@@ -470,7 +480,7 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-          Back to Dojo
+          {t("backToDojo")}
         </button>
 
         {/* Header with dojo name */}
@@ -479,10 +489,12 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
             {dojoName && (
               <p className="text-sm font-medium text-blue-600 mb-1">{dojoName}</p>
             )}
-            <h1 className="text-3xl font-bold text-gray-900">Members</h1>
+            <h1 className="text-3xl font-bold text-gray-900">{t("title")}</h1>
             <p className="text-gray-600 mt-2">
-              {members.length} active member{members.length !== 1 && "s"}
-              {pendingMembers.length > 0 && ` · ${pendingMembers.length} pending`}
+              {members.length === 1
+                ? t("activeMembersCount", { count: members.length })
+                : t("activeMembersCountPlural", { count: members.length })}
+              {pendingMembers.length > 0 && ` · ${t("pendingCount", { count: pendingMembers.length })}`}
             </p>
           </div>
 
@@ -491,13 +503,13 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
               onClick={copyInviteLink}
               className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-gray-700 font-medium"
             >
-              <span className="mr-1.5">🔗</span>Copy Invite Link
+              <span className="mr-1.5">🔗</span>{t("copyInviteLink")}
             </button>
             <button
               onClick={() => setAddModalOpen(true)}
               className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition font-medium"
             >
-              + Add Member
+              {t("addMember")}
             </button>
           </div>
         </div>
@@ -524,7 +536,7 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
                 : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
             }`}
           >
-            Active ({members.length})
+            {t("active")} ({members.length})
           </button>
           <button
             onClick={() => setShowTab("pending")}
@@ -534,7 +546,7 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
                 : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
             }`}
           >
-            Pending ({pendingMembers.length})
+            {t("pending")} ({pendingMembers.length})
             {pendingMembers.length > 0 && (
               <span className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full border-2 border-gray-50" />
             )}
@@ -561,7 +573,7 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
                   />
                 </svg>
                 <input
-                  placeholder="Search members..."
+                  placeholder={t("searchPlaceholder")}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -572,18 +584,18 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
                 onChange={(e) => setFilterRole(e.target.value)}
                 className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="all">All Roles</option>
-                <option value="student">Students</option>
-                <option value="coach">Coaches</option>
-                <option value="staff">Staff</option>
-                <option value="owner">Owners</option>
+                <option value="all">{t("filterAllRoles")}</option>
+                <option value="student">{t("filterStudents")}</option>
+                <option value="coach">{t("filterCoaches")}</option>
+                <option value="staff">{t("filterStaff")}</option>
+                <option value="owner">{t("filterOwners")}</option>
               </select>
             </div>
 
             {/* Member List */}
             {filtered.length === 0 ? (
               <div className="px-6 py-12 text-center text-gray-500">
-                {members.length === 0 ? "No members yet. Add your first member above." : "No results found."}
+                {members.length === 0 ? t("noMembersAdd") : t("noResults")}
               </div>
             ) : (
               <div className="divide-y divide-gray-100">
@@ -615,7 +627,7 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
                         ROLE_BADGE_COLORS[m.roleInDojo] || "bg-gray-100 text-gray-700"
                       }`}
                     >
-                      {ROLE_LABELS[m.roleInDojo] || m.roleInDojo}
+                      {roleLabels[m.roleInDojo] || m.roleInDojo}
                     </span>
 
                     <svg
@@ -637,7 +649,7 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
         {showTab === "pending" && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200">
             {pendingMembers.length === 0 ? (
-              <div className="px-6 py-12 text-center text-gray-500">No pending requests.</div>
+              <div className="px-6 py-12 text-center text-gray-500">{t("noPendingRequests")}</div>
             ) : (
               <div className="divide-y divide-gray-100">
                 {pendingMembers.map((m) => (
@@ -658,14 +670,14 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
                       disabled={busy}
                       className="px-4 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-sm font-medium hover:bg-green-100 transition disabled:opacity-50"
                     >
-                      Approve
+                      {t("approve")}
                     </button>
                     <button
                       onClick={() => rejectRequest(m)}
                       disabled={busy}
                       className="px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 transition disabled:opacity-50"
                     >
-                      Reject
+                      {t("reject")}
                     </button>
                   </div>
                 ))}
@@ -695,27 +707,27 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                   </div>
-                  <h3 className="text-xl font-bold text-gray-900">Member Created!</h3>
+                  <h3 className="text-xl font-bold text-gray-900">{t("memberCreated")}</h3>
                 </div>
 
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3 mb-6">
                   <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide">Name</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">{t("name")}</p>
                     <p className="font-medium text-gray-900">{createdMember.displayName}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide">Email</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">{t("email")}</p>
                     <p className="font-medium text-gray-900">{createdMember.email}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide">Temporary Password</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">{t("temporaryPassword")}</p>
                     <p className="font-mono text-lg font-bold text-green-700">{createdMember.temporaryPassword}</p>
                   </div>
                 </div>
 
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 mb-6">
                   <p className="text-sm text-yellow-800">
-                    Save this password and share it securely with the member.
+                    {t("savePasswordWarning")}
                   </p>
                 </div>
 
@@ -723,17 +735,17 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
                   onClick={closeModal}
                   className="w-full py-3 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition"
                 >
-                  Done
+                  {t("done")}
                 </button>
               </div>
             ) : (
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-bold text-gray-900">Add New Member</h3>
+                  <h3 className="text-xl font-bold text-gray-900">{t("addNewMember")}</h3>
                   <button
                     onClick={closeModal}
                     className="text-gray-400 hover:text-gray-600 transition"
-                    aria-label="Close"
+                    aria-label={t("close")}
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -750,51 +762,51 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Name <span className="text-red-500">*</span>
+                      {t("name")} <span className="text-red-500">*</span>
                     </label>
                     <input
                       value={newMember.displayName}
                       onChange={(e) => setNewMember((p) => ({ ...p, displayName: e.target.value }))}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="John Doe"
+                      placeholder={t("namePlaceholder")}
                     />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Email <span className="text-red-500">*</span>
+                      {t("email")} <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="email"
                       value={newMember.email}
                       onChange={(e) => setNewMember((p) => ({ ...p, email: e.target.value }))}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="john@example.com"
+                      placeholder={t("emailPlaceholder")}
                     />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Password <span className="text-gray-400 font-normal">(auto-generated if empty)</span>
+                      {t("passwordLabel")} <span className="text-gray-400 font-normal">{t("passwordAutoGenerated")}</span>
                     </label>
                     <input
                       value={newMember.password}
                       onChange={(e) => setNewMember((p) => ({ ...p, password: e.target.value }))}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Leave empty to auto-generate"
+                      placeholder={t("passwordPlaceholder")}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{t("roleLabel")}</label>
                     <select
                       value={newMember.roleInDojo}
                       onChange={(e) => setNewMember((p) => ({ ...p, roleInDojo: e.target.value }))}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="student">Student</option>
-                      <option value="coach">Coach</option>
-                      <option value="staff">Staff</option>
+                      <option value="student">{t("roleStudent")}</option>
+                      <option value="coach">{t("roleCoach")}</option>
+                      <option value="staff">{t("roleStaff")}</option>
                     </select>
                   </div>
                 </div>
@@ -804,14 +816,14 @@ export default function MembersClient(props: { dojoId?: string } = {}) {
                     onClick={closeModal}
                     className="flex-1 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition"
                   >
-                    Cancel
+                    {t("cancel")}
                   </button>
                   <button
                     onClick={addMember}
                     disabled={busy || !newMember.displayName.trim() || !newMember.email.trim()}
                     className="flex-1 py-2.5 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {busy ? "Creating..." : "Create Member"}
+                    {busy ? t("creating") : t("createMember")}
                   </button>
                 </div>
               </div>

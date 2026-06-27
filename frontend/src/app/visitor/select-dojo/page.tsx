@@ -2,6 +2,7 @@
 
 import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 
 import {
   authNullable,
@@ -36,6 +37,7 @@ async function ensureGuestAuth() {
 function VisitorSelectDojoContent() {
   const router = useRouter();
   const sp = useSearchParams();
+  const t = useTranslations("visitor.selectDojo");
 
   const next = sp.get("next") || "/visitor/complete";
 
@@ -46,9 +48,6 @@ function VisitorSelectDojoContent() {
   const [dojos, setDojos] = useState<DojoInfo[]>([]);
   const [search, setSearch] = useState("");
 
-  // ✅ FIX: Check auth state first. If logged-in (non-anonymous) user,
-  // redirect to their dojo's waiver page instead of showing visitor flow.
-  // This prevents signInAnonymously from overwriting their session.
   useEffect(() => {
     if (!authNullable) {
       setAuthChecked(true);
@@ -57,7 +56,6 @@ function VisitorSelectDojoContent() {
 
     const unsub = onAuthStateChanged(authNullable, async (user) => {
       if (user && !user.isAnonymous) {
-        // Logged-in user — find their dojoId and redirect
         try {
           const db = dbNullable;
           if (db) {
@@ -85,11 +83,8 @@ function VisitorSelectDojoContent() {
     return () => unsub();
   }, [router]);
 
-  // ✅ FIX: Only load dojos after auth check. If user is logged in, they'll be
-  // redirected before this runs. This prevents ensureGuestAuth() from being called
-  // for logged-in users (which would overwrite their session with anonymous).
   useEffect(() => {
-    if (!authChecked) return; // Wait for auth check to complete
+    if (!authChecked) return;
 
     let cancelled = false;
 
@@ -101,11 +96,8 @@ function VisitorSelectDojoContent() {
         await ensureGuestAuth();
 
         const db = dbNullable;
-        if (!db) throw new Error("Firestore is not initialized.");
+        if (!db) throw new Error(t("errors.firestoreNotInit"));
 
-        // ✅ FIX: Use dojos collection with isPublic filter.
-        // Firestore rules allow read when resource.data.isPublic == true,
-        // so this query works for anonymous users too.
         const q = query(collection(db, "dojos"), where("isPublic", "==", true));
         const snap = await getDocs(q);
 
@@ -126,7 +118,7 @@ function VisitorSelectDojoContent() {
 
         setDojos(list);
       } catch (e: any) {
-        setError(e?.message || "Failed to load dojos.");
+        setError(e?.message || t("errors.loadFailed"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -136,7 +128,7 @@ function VisitorSelectDojoContent() {
     return () => {
       cancelled = true;
     };
-  }, [authChecked]);
+  }, [authChecked, t]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -157,7 +149,7 @@ function VisitorSelectDojoContent() {
       qs.set("next", next);
       router.push(`/visitor/${encodeURIComponent(dojoId)}/waiver?${qs.toString()}`);
     } catch (e: any) {
-      setError(e?.message || "Failed to continue.");
+      setError(e?.message || t("errors.continueFailed"));
     } finally {
       setBusy(false);
     }
@@ -168,10 +160,10 @@ function VisitorSelectDojoContent() {
       <main className="max-w-xl mx-auto px-4 py-8 space-y-5">
         <div className="text-center space-y-2">
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">
-            Choose your dojo
+            {t("title")}
           </h1>
           <p className="text-slate-500 text-sm">
-            Visitors can sign the waiver without creating an account.
+            {t("subtitle")}
           </p>
         </div>
 
@@ -180,7 +172,7 @@ function VisitorSelectDojoContent() {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search dojo name / city..."
+            placeholder={t("searchPlaceholder")}
             className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
           />
         </div>
@@ -197,7 +189,7 @@ function VisitorSelectDojoContent() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 text-center text-slate-500 text-sm">
-            No public dojos found.
+            {t("noResults")}
           </div>
         ) : (
           <div className="space-y-2">
@@ -239,7 +231,7 @@ function VisitorSelectDojoContent() {
             onClick={() => router.push("/signup")}
             className="text-sm text-slate-600 hover:underline"
           >
-            Create a student account instead
+            {t("createAccountInstead")}
           </button>
         </div>
       </main>

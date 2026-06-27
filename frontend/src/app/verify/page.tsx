@@ -1,14 +1,4 @@
 // app/verify/page.tsx
-//
-// 毎回ログイン時のメール認証ページ。
-//
-// フロー:
-//   1. ログイン → navigateAfterAuth() → Go API /v1/auth/reset-email-verified で
-//      emailVerified=false にリセット → /verify へリダイレクト
-//   2. /verify → sendEmailVerification() でメール送信
-//   3. ユーザーがどのデバイスでもリンクをクリック → Firebase Auth が emailVerified=true に
-//   4. このページで user.reload() をポーリング → emailVerified==true を検知
-//   5. sessionVerified=true にして /verify/success → /home
 
 "use client";
 
@@ -20,8 +10,10 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
+import { useTranslations } from "next-intl";
 import { authNullable, dbNullable } from "@/firebase";
 import { markSessionVerified } from "@/lib/sessionVerification";
+import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 
 const LOGO_SRC = "/assets/jiujitsu-samurai-Logo.png";
 const COOLDOWN_SECONDS = 60;
@@ -38,6 +30,8 @@ const Alert = ({ kind, children }: { kind: "error" | "success" | "info"; childre
 
 export default function VerifyPage() {
   const router = useRouter();
+  const t = useTranslations("verify");
+  const tCommon = useTranslations("common");
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -52,8 +46,8 @@ export default function VerifyPage() {
   // Cooldown timer
   useEffect(() => {
     if (cooldown <= 0) return;
-    const t = setInterval(() => setCooldown(c => Math.max(0, c - 1)), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setCooldown(c => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(timer);
   }, [cooldown]);
 
   // Auth state
@@ -74,11 +68,8 @@ export default function VerifyPage() {
     };
   }, []);
 
-  // ─────────────────────────────────────────
-  // Polling: check emailVerified
-  // ─────────────────────────────────────────
   const startPolling = useCallback(() => {
-    if (pollRef.current) return; // already polling
+    if (pollRef.current) return;
     setPolling(true);
     let attempts = 0;
 
@@ -88,7 +79,7 @@ export default function VerifyPage() {
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = null;
         setPolling(false);
-        setError("Verification timed out. Please resend the email.");
+        setError(t("errors.timeout"));
         return;
       }
 
@@ -100,86 +91,74 @@ export default function VerifyPage() {
         const refreshed = authNullable?.currentUser;
 
         if (refreshed?.emailVerified) {
-          // ✅ Email verified!
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
           setPolling(false);
 
-          // Force token refresh so Firestore rules see updated emailVerified
           await refreshed.getIdToken(true);
 
-          // Mark session as verified in Firestore
           if (dbNullable) {
             await markSessionVerified(dbNullable, refreshed.uid);
           }
 
-          setSuccess("Email verified! Redirecting...");
+          setSuccess(t("verifiedRedirecting"));
           setTimeout(() => router.replace("/verify/success"), 1000);
         }
       } catch (err) {
         console.error("[Verify] Polling error:", err);
       }
     }, POLL_INTERVAL_MS);
-  }, [router]);
+  }, [router, t]);
 
-  // ─────────────────────────────────────────
-  // Send verification email
-  // ─────────────────────────────────────────
   const sendVerification = useCallback(async () => {
     if (!user || !authNullable || sending || cooldown > 0) return;
     setSending(true); setError(""); setSuccess("");
     try {
-      console.log("[Verify] Sending verification email...");
       await sendEmailVerification(user);
-      console.log("[Verify] Verification email sent");
       setSent(true);
       setCooldown(COOLDOWN_SECONDS);
-      setSuccess(`Verification email sent to ${user.email}`);
-
-      // Start polling for emailVerified
+      setSuccess(t("verificationSentTo", { email: user.email ?? "" }));
       startPolling();
     } catch (err: any) {
       console.error("[Verify] sendEmailVerification error:", err?.code, err?.message);
       if (err?.code === "auth/too-many-requests") {
-        setError("Too many requests. Please wait a few minutes.");
+        setError(t("errors.tooManyRequests"));
         setCooldown(COOLDOWN_SECONDS * 2);
-        // Still start polling - email may have been sent before
         startPolling();
       } else {
-        setError(err?.message || "Failed to send verification email.");
+        setError(t("errors.sendFailed"));
       }
     } finally { setSending(false); }
-  }, [user, sending, cooldown, startPolling]);
+  }, [user, sending, cooldown, startPolling, t]);
 
-  // Auto-send on first load
   useEffect(() => {
     if (autoSentRef.current || !user || loading) return;
     autoSentRef.current = true;
     sendVerification();
   }, [user, loading, sendVerification]);
 
-  // ─────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────
   if (loading) return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-md text-center space-y-4">
-        <img src={LOGO_SRC} alt="Logo" className="w-16 h-16 mx-auto rounded-2xl shadow-lg" />
+        <img src={LOGO_SRC} alt={tCommon("appName")} className="w-16 h-16 mx-auto rounded-2xl shadow-lg" />
         <div className="flex items-center justify-center gap-2 text-slate-500">
           <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-          <span>Loading...</span>
+          <span>{t("loadingShort")}</span>
         </div>
       </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col items-center justify-center p-6">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col items-center justify-center p-6 relative">
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
       <div className="w-full max-w-md space-y-6">
         <div className="text-center">
-          <img src={LOGO_SRC} alt="Logo" className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-lg" />
-          <h1 className="text-2xl font-bold text-slate-900">Verify Your Identity</h1>
-          <p className="mt-2 text-slate-500">For security, please verify your email each time you log in.</p>
+          <img src={LOGO_SRC} alt={tCommon("appName")} className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-lg" />
+          <h1 className="text-2xl font-bold text-slate-900">{t("title")}</h1>
+          <p className="mt-2 text-slate-500">{t("subtitle")}</p>
         </div>
 
         {error && <Alert kind="error">❌ {error}</Alert>}
@@ -187,35 +166,37 @@ export default function VerifyPage() {
 
         <Card><div className="px-5 py-6 sm:px-6 sm:py-8 space-y-4">
           <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 text-center">
-            <div className="text-xs text-slate-500 mb-1">Verification email {sent ? "sent" : "will be sent"} to</div>
+            <div className="text-xs text-slate-500 mb-1">
+              {sent ? t("sentTo") : t("willSendTo")}
+            </div>
             <div className="font-semibold text-slate-900">{user?.email || "..."}</div>
           </div>
 
           <div className="space-y-3 text-sm text-slate-600">
             <div className="flex items-start gap-3">
               <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-bold">1</div>
-              <span>Check your email inbox (and spam folder)</span>
+              <span>{t("step1")}</span>
             </div>
             <div className="flex items-start gap-3">
               <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-bold">2</div>
-              <span>Click the verification link (works on any device)</span>
+              <span>{t("step2")}</span>
             </div>
             <div className="flex items-start gap-3">
               <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-bold">3</div>
-              <span>This page will automatically detect and redirect you</span>
+              <span>{t("step3")}</span>
             </div>
           </div>
 
           {polling && (
             <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
               <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-              <span>Waiting for verification...</span>
+              <span>{t("waitingForVerification")}</span>
             </div>
           )}
 
           <button onClick={sendVerification} disabled={sending || cooldown > 0}
             className="w-full rounded-full bg-slate-900 px-6 py-3 text-base font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed">
-            {sending ? "Sending..." : cooldown > 0 ? `Resend in ${cooldown}s` : sent ? "Resend Verification Email" : "Send Verification Email"}
+            {sending ? t("sending") : cooldown > 0 ? t("resendIn", { seconds: cooldown }) : sent ? t("resend") : t("send")}
           </button>
         </div></Card>
 
@@ -225,7 +206,7 @@ export default function VerifyPage() {
             try { if (authNullable) await signOut(authNullable); } catch {}
             router.replace("/login");
           }} className="text-sm text-slate-500 hover:text-slate-700 hover:underline">
-            Sign out and use a different account
+            {t("signOutDifferentAccount")}
           </button>
         </div>
       </div>

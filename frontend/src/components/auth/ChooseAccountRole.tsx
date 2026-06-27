@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 
 import {
   authNullable,
@@ -37,6 +38,8 @@ export default function ChooseAccountRole({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
   const router = useRouter();
+  const t = useTranslations("auth.chooseRole");
+  const tCommon = useTranslations("common");
 
   const toStoredRole = (role: RoleKey) => {
     if (role === "staff") return "staff_member";
@@ -182,7 +185,7 @@ export default function ChooseAccountRole({
       }
     } catch (e: unknown) {
       const msg =
-        e instanceof Error ? e.message : typeof e === "string" ? e : "Failed to continue.";
+        e instanceof Error ? e.message : typeof e === "string" ? e : t("errorGeneric");
       setError(msg);
     } finally {
       setBusy(false);
@@ -194,15 +197,15 @@ export default function ChooseAccountRole({
       {/* Logo */}
       <img
         src="/assets/jiujitsu-samurai-Logo.png"
-        alt="Logo"
+        alt={tCommon("appName")}
         className="w-20 h-20 mb-8 rounded-2xl shadow-lg"
       />
 
       {/* Question */}
       <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-3 text-center">
-        Who are you?
+        {t("title")}
       </h1>
-      <p className="text-slate-500 mb-10 text-center">Tap to select</p>
+      <p className="text-slate-500 mb-10 text-center">{t("subtitle")}</p>
 
       {/* Role Buttons */}
       <div className="w-full max-w-sm space-y-4">
@@ -218,7 +221,7 @@ export default function ChooseAccountRole({
               <div className="w-14 h-14 rounded-2xl bg-emerald-100 flex items-center justify-center group-hover:scale-110 transition-transform">
                 <span className="text-3xl">🥋</span>
               </div>
-              <span className="text-lg font-bold text-slate-900">Student</span>
+              <span className="text-lg font-bold text-slate-900">{t("student")}</span>
             </div>
           </button>
 
@@ -232,7 +235,7 @@ export default function ChooseAccountRole({
               <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center group-hover:scale-110 transition-transform">
                 <span className="text-3xl">🏢</span>
               </div>
-              <span className="text-lg font-bold text-slate-900">Staff</span>
+              <span className="text-lg font-bold text-slate-900">{t("staff")}</span>
             </div>
           </button>
         </div>
@@ -249,8 +252,8 @@ export default function ChooseAccountRole({
                 <span className="text-3xl">📝</span>
               </div>
               <div className="text-left">
-                <div className="text-lg font-bold text-slate-900">Visitor</div>
-                <div className="text-sm text-slate-500">Waiver (No account)</div>
+                <div className="text-lg font-bold text-slate-900">{t("visitor")}</div>
+                <div className="text-sm text-slate-500">{t("visitorDesc")}</div>
               </div>
             </div>
             <div className="text-slate-400 text-sm font-semibold">→</div>
@@ -266,16 +269,16 @@ export default function ChooseAccountRole({
       )}
 
       {/* Loading indicator */}
-      {busy && <div className="mt-6 text-slate-500 text-sm">Loading...</div>}
+      {busy && <div className="mt-6 text-slate-500 text-sm">{t("loading")}</div>}
 
       {/* Login Link */}
       <p className="mt-10 text-sm text-slate-500">
-        Already have an account?{" "}
+        {t("alreadyHaveAccount")}{" "}
         <button
           onClick={() => safeNavigate(loginPath)}
           className="font-semibold text-slate-900 hover:underline"
         >
-          Log in
+          {t("logIn")}
         </button>
       </p>
     </div>

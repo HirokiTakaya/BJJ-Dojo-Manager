@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { dbNullable, firebaseEnabled, firebaseDisabledReason } from "@/firebase";
 import { formatFirebaseErr } from "@/lib/errors";
@@ -33,6 +34,7 @@ function daysAgoKey(n: number) {
 }
 
 export default function AttendanceDashboardClient({ dojoId }: { dojoId: string }) {
+  const t = useTranslations("attendanceDashboard");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -49,11 +51,11 @@ export default function AttendanceDashboardClient({ dojoId }: { dojoId: string }
 
   const load = async () => {
     if (!firebaseEnabled) {
-      setErr(firebaseDisabledReason ?? "Firebase is disabled.");
+      setErr(firebaseDisabledReason ?? t("firebaseDisabled"));
       return;
     }
     if (!dbNullable) {
-      setErr("Firestore is not ready.");
+      setErr(t("firestoreNotReady"));
       return;
     }
 
@@ -86,7 +88,6 @@ export default function AttendanceDashboardClient({ dojoId }: { dojoId: string }
       setSessions(rows);
 
       const counts: Record<string, number> = {};
-      // MVP: get present count per session (move to Cloud Function aggregation later if heavy)
       for (const s of rows) {
         counts[s.id] = await countPresent(dbNullable, dojoId, s.id);
       }
@@ -105,9 +106,9 @@ export default function AttendanceDashboardClient({ dojoId }: { dojoId: string }
 
   return (
     <div style={{ padding: 6 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 6 }}>Attendance Dashboard</h1>
+      <h1 style={{ fontSize: 22, marginBottom: 6 }}>{t("title")}</h1>
       <p style={{ opacity: 0.8, marginBottom: 14 }}>
-        Visualize attendance counts per recent session (MVP).
+        {t("subtitle")}
       </p>
 
       {err && (
@@ -125,7 +126,7 @@ export default function AttendanceDashboardClient({ dojoId }: { dojoId: string }
       )}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <div style={{ fontWeight: 900 }}>From</div>
+        <div style={{ fontWeight: 900 }}>{t("from")}</div>
         <input
           type="date"
           value={fromKey}
@@ -133,7 +134,7 @@ export default function AttendanceDashboardClient({ dojoId }: { dojoId: string }
           style={{ padding: 10, borderRadius: 12, border: "1px solid rgba(0,0,0,0.15)" }}
         />
 
-        <div style={{ fontWeight: 900 }}>To</div>
+        <div style={{ fontWeight: 900 }}>{t("to")}</div>
         <input
           type="date"
           value={toKey}
@@ -155,23 +156,23 @@ export default function AttendanceDashboardClient({ dojoId }: { dojoId: string }
             opacity: busy ? 0.6 : 1,
           }}
         >
-          {busy ? "Loading..." : "Refresh"}
+          {busy ? t("loading") : t("refresh")}
         </button>
 
         {busy && <LoadingInline />}
       </div>
 
       <div style={{ marginTop: 14, padding: 12, borderRadius: 12, border: "1px solid rgba(0,0,0,0.12)" }}>
-        <div style={{ fontWeight: 900 }}>Summary</div>
+        <div style={{ fontWeight: 900 }}>{t("summary")}</div>
         <div style={{ marginTop: 6, opacity: 0.85 }}>
-          Sessions: <b>{sessions.length}</b> / Total present marks: <b>{totalPresent}</b>
+          {t("summaryLine", { sessions: sessions.length, present: totalPresent })}
         </div>
       </div>
 
       <div style={{ marginTop: 14 }}>
-        <div style={{ fontWeight: 900, marginBottom: 8 }}>Sessions</div>
+        <div style={{ fontWeight: 900, marginBottom: 8 }}>{t("sessions")}</div>
 
-        {sessions.length === 0 && <div style={{ opacity: 0.7 }}>No sessions in this range.</div>}
+        {sessions.length === 0 && <div style={{ opacity: 0.7 }}>{t("noSessions")}</div>}
 
         <div style={{ display: "grid", gap: 10 }}>
           {sessions.map((s) => (
@@ -188,12 +189,12 @@ export default function AttendanceDashboardClient({ dojoId }: { dojoId: string }
               }}
             >
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ fontWeight: 900 }}>{s.title || "(no title)"}</div>
+                <div style={{ fontWeight: 900 }}>{s.title || t("noTitle")}</div>
                 <div style={{ opacity: 0.75, fontSize: 13 }}>
-                  {s.dateKey} · present: <b>{presentCounts[s.id] ?? 0}</b>
+                  {s.dateKey} · {t("presentLabel")}: <b>{presentCounts[s.id] ?? 0}</b>
                 </div>
               </div>
-              <div style={{ opacity: 0.6, fontSize: 12, marginTop: 6 }}>sessionId: {s.id}</div>
+              <div style={{ opacity: 0.6, fontSize: 12, marginTop: 6 }}>{t("sessionId")}: {s.id}</div>
             </a>
           ))}
         </div>

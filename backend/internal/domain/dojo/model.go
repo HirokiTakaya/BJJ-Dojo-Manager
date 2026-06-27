@@ -6,12 +6,12 @@ import (
 )
 
 type Dojo struct {
-	ID        string    `firestore:"id" json:"id"`
-	Name      string    `firestore:"name" json:"name"`
-	NameLower string    `firestore:"nameLower" json:"-"`
-	Slug      string    `firestore:"slug" json:"slug"`
-	City      string    `firestore:"city,omitempty" json:"city,omitempty"`
-	Country   string    `firestore:"country,omitempty" json:"country,omitempty"`
+	ID        string `firestore:"id" json:"id"`
+	Name      string `firestore:"name" json:"name"`
+	NameLower string `firestore:"nameLower" json:"-"`
+	Slug      string `firestore:"slug" json:"slug"`
+	City      string `firestore:"city,omitempty" json:"city,omitempty"`
+	Country   string `firestore:"country,omitempty" json:"country,omitempty"`
 
 	CreatedBy string   `firestore:"createdBy" json:"createdBy"`
 	OwnerUID  string   `firestore:"ownerUid,omitempty" json:"ownerUid,omitempty"`
@@ -53,6 +53,14 @@ func (in *CreateDojoInput) Trim() {
 	in.Slug = strings.TrimSpace(in.Slug)
 	in.City = strings.TrimSpace(in.City)
 	in.Country = strings.TrimSpace(in.Country)
+}
+
+type UpdateDojoNameInput struct {
+	Name string `json:"name"`
+}
+
+func (in *UpdateDojoNameInput) Trim() {
+	in.Name = strings.TrimSpace(in.Name)
 }
 
 type CreateJoinRequestInput struct {

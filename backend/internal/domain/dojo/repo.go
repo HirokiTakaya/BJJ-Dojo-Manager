@@ -162,4 +162,50 @@ func (r *Repo) IsStaff(ctx context.Context, dojoId, uid string) (bool, error) {
 	return false, nil
 }
 
+// IsOwner returns true only if uid is an owner of the dojo (not merely staff).
+func (r *Repo) IsOwner(ctx context.Context, dojoId, uid string) (bool, error) {
+	d, err := r.GetDojo(ctx, dojoId)
+	if err != nil {
+		return false, err
+	}
+	if d.OwnerUID == uid {
+		return true, nil
+	}
+	if d.CreatedBy == uid {
+		return true, nil
+	}
+	for _, o := range d.OwnerIds {
+		if o == uid {
+			return true, nil
+		}
+	}
+	// members subcollection: only "owner" role counts
+	memberDoc, err := r.fs.Collection("dojos").Doc(dojoId).Collection("members").Doc(uid).Get(ctx)
+	if err == nil && memberDoc.Exists() {
+		data := memberDoc.Data()
+		if role, ok := data["role"].(string); ok && role == "owner" {
+			return true, nil
+		}
+		if roleInDojo, ok := data["roleInDojo"].(string); ok && roleInDojo == "owner" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// UpdateDojoName updates the dojo's name + nameLower (search index) + updatedAt.
+// Slug is intentionally left unchanged to keep any existing URLs/links stable.
+func (r *Repo) UpdateDojoName(ctx context.Context, dojoId, name string) (*Dojo, error) {
+	ref := r.fs.Collection("dojos").Doc(dojoId)
+	_, err := ref.Set(ctx, map[string]interface{}{
+		"name":      name,
+		"nameLower": strings.ToLower(name),
+		"updatedAt": now(),
+	}, firestore.MergeAll)
+	if err != nil {
+		return nil, err
+	}
+	return r.GetDojo(ctx, dojoId)
+}
+
 func now() time.Time { return time.Now().UTC() }

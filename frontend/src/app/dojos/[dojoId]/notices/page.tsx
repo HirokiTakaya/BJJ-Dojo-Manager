@@ -1,8 +1,8 @@
-
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { useAuth } from '@/providers/AuthProvider';
 import { asDate, computeUiStatus, subscribeNoticesForStaff } from '@/lib/notices';
 import type { NoticeRow } from '@/lib/noticesTypes';
@@ -92,16 +92,16 @@ const FilterSelect = React.memo(
 );
 FilterSelect.displayName = 'FilterSelect';
 
-const EmptyState = React.memo(() => (
+const EmptyState = React.memo(({ text }: { text: string }) => (
   <div className="rounded-3xl border border-slate-200 bg-white px-5 py-8 text-center shadow-sm">
-    <div className="text-slate-500">No announcements found.</div>
+    <div className="text-slate-500">{text}</div>
   </div>
 ));
 EmptyState.displayName = 'EmptyState';
 
-const LoadingState = React.memo(() => (
+const LoadingState = React.memo(({ text }: { text: string }) => (
   <div className="rounded-3xl border border-slate-200 bg-white px-5 py-8 text-center shadow-sm">
-    <div className="text-slate-500">Loading…</div>
+    <div className="text-slate-500">{text}</div>
   </div>
 ));
 LoadingState.displayName = 'LoadingState';
@@ -114,6 +114,12 @@ export default function StaffNoticesPage() {
   const router = useRouter();
   const sp = useSearchParams();
   const { user } = useAuth();
+  const t = useTranslations('notices');
+
+  const TYPE_LABELS_T = {
+    memo: t('typeGymUpdate'),
+    notice: t('typeNotice'),
+  } as const;
 
   const initialTab = (sp.get('filter') as TabType) || 'active';
 
@@ -211,12 +217,12 @@ export default function StaffNoticesPage() {
   const items: ListItemData[] = useMemo(() => {
     return filteredRows.map((n) => ({
       id: n.id,
-      left: TYPE_LABELS[n.type as keyof typeof TYPE_LABELS] ?? 'Announcement',
+      left: TYPE_LABELS_T[n.type as keyof typeof TYPE_LABELS_T] ?? t("typeNotice"),
       title: n.title,
       dateText: formatDateRange(asDate(n.startTime), asDate(n.endTime)),
       uiStatus: computeUiStatus(n),
     }));
-  }, [filteredRows]);
+  }, [filteredRows, t]);
 
   // Callbacks
   const handleTabChange = useCallback((newTab: TabType) => {
@@ -260,7 +266,7 @@ export default function StaffNoticesPage() {
       <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
         <div className="mx-auto max-w-4xl p-4 sm:p-6">
           <div className="rounded-3xl border border-slate-200 bg-white px-5 py-6 shadow-sm">
-            Please sign in.
+            {t('pleaseSignIn')}
           </div>
         </div>
       </div>
@@ -278,24 +284,24 @@ export default function StaffNoticesPage() {
           <div className="px-5 py-4 sm:px-6 sm:py-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">Gym Announcements</h1>
-                <p className="mt-1 text-sm text-slate-500">Manage updates and announcements for your members</p>
+                <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">{t('adminTitle')}</h1>
+                <p className="mt-1 text-sm text-slate-500">{t('adminSubtitle')}</p>
               </div>
               <button
                 className="px-4 py-2 rounded-full bg-slate-900 text-white hover:bg-slate-800 transition text-sm font-semibold"
                 onClick={handleCompose}
               >
-                Compose
+                {t('compose')}
               </button>
             </div>
 
             {/* Tabs */}
             <div className="mt-4 flex gap-2">
               <TabButton active={tab === 'active'} onClick={() => handleTabChange('active')}>
-                Active
+                {t('tabActive')}
               </TabButton>
               <TabButton active={tab === 'all'} onClick={() => handleTabChange('all')}>
-                All
+                {t('tabAll')}
               </TabButton>
             </div>
           </div>
@@ -307,7 +313,7 @@ export default function StaffNoticesPage() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <input
                 className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                placeholder="Search"
+                placeholder={t('searchPlaceholderSimple')}
                 value={searchText}
                 onChange={handleSearchChange}
               />
@@ -315,19 +321,19 @@ export default function StaffNoticesPage() {
                 value={filterType}
                 onChange={handleTypeChange}
                 options={[
-                  { value: 'all', label: 'All types' },
-                  { value: 'notice', label: 'Announcement' },
-                  { value: 'memo', label: 'Gym Update' },
+                  { value: 'all', label: t('filterAllTypes') },
+                  { value: 'notice', label: t('typeNotice') },
+                  { value: 'memo', label: t('typeGymUpdate') },
                 ]}
               />
               <FilterSelect
                 value={filterStatus}
                 onChange={handleStatusChange}
                 options={[
-                  { value: 'all', label: 'All status' },
-                  { value: 'active', label: 'Active' },
-                  { value: 'upcoming', label: 'Upcoming' },
-                  { value: 'complete', label: 'Complete' },
+                  { value: 'all', label: t('filterAllStatus') },
+                  { value: 'active', label: t('filterStatusActive') },
+                  { value: 'upcoming', label: t('filterStatusUpcoming') },
+                  { value: 'complete', label: t('filterStatusComplete') },
                 ]}
               />
 
@@ -353,9 +359,9 @@ export default function StaffNoticesPage() {
         {/* List */}
         <div className="space-y-2">
           {loading ? (
-            <LoadingState />
+            <LoadingState text={t('loading')} />
           ) : items.length === 0 ? (
-            <EmptyState />
+            <EmptyState text={t('emptyAdmin')} />
           ) : (
             items.map((it) => (
               <NoticeListItem
@@ -373,7 +379,7 @@ export default function StaffNoticesPage() {
         {/* Loading indicator for filter changes */}
         {isPending && (
           <div className="fixed bottom-20 md:bottom-4 right-4 rounded-full bg-slate-900 text-white px-4 py-2 text-sm shadow-lg">
-            Updating…
+            {t('loadingUpdating')}
           </div>
         )}
       </div>

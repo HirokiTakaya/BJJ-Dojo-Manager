@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import { auth, db as dbNullable } from "@/firebase";
 import {
@@ -119,7 +120,7 @@ function buildSafeMemberName(name?: string | null, email?: string | null, uid?: 
   if (e) return e;
 
   const u = (uid ?? "").trim();
-  return u ? u.substring(0, 8) : "Member";
+  return u ? u.substring(0, 8) : "";
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -610,10 +611,12 @@ const ClassTypeSelect = ({
   value,
   onChange,
   disabled,
+  labels,
 }: {
   value: ClassType;
   onChange: (v: ClassType) => void;
   disabled?: boolean;
+  labels: Record<ClassType, string>;
 }) => (
   <div className="flex flex-wrap gap-2">
     {(["adult", "kids", "mixed"] as ClassType[]).map((type) => {
@@ -631,19 +634,19 @@ const ClassTypeSelect = ({
             disabled ? "cursor-not-allowed opacity-50" : "",
           ].join(" ")}
         >
-          {config.emoji} {config.label}
+          {config.emoji} {labels[type]}
         </button>
       );
     })}
   </div>
 );
 
-const FilterTabs = ({ value, onChange }: { value: ClassType | "all"; onChange: (v: ClassType | "all") => void }) => {
+const FilterTabs = ({ value, onChange, labels }: { value: ClassType | "all"; onChange: (v: ClassType | "all") => void; labels: { all: string; adult: string; kids: string; mixed: string } }) => {
   const options: Array<{ key: ClassType | "all"; label: string; emoji?: string }> = [
-    { key: "all", label: "All" },
-    { key: "adult", label: "Adult", emoji: "🥋" },
-    { key: "kids", label: "Kids", emoji: "👶" },
-    { key: "mixed", label: "Mixed", emoji: "👨‍👩‍👧" },
+    { key: "all", label: labels.all },
+    { key: "adult", label: labels.adult, emoji: "🥋" },
+    { key: "kids", label: labels.kids, emoji: "👶" },
+    { key: "mixed", label: labels.mixed, emoji: "👨‍👩‍👧" },
   ];
   return (
     <div className="flex flex-wrap gap-2">
@@ -671,12 +674,20 @@ const InstructorSelect = ({
   onChange,
   disabled,
   allowManualInput = true,
+  selectFromListLabel,
+  enterManuallyLabel,
+  manualPlaceholder,
+  noInstructorLabel,
 }: {
   instructors: InstructorInfo[];
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
   allowManualInput?: boolean;
+  selectFromListLabel: string;
+  enterManuallyLabel: string;
+  manualPlaceholder: string;
+  noInstructorLabel: string;
 }) => {
   const resolvedValue = useMemo(() => {
     if (!value) return "";
@@ -713,8 +724,8 @@ const InstructorSelect = ({
         disabled={disabled}
         className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
       >
-        <option value="select">Select from list</option>
-        {allowManualInput && <option value="manual">Enter manually</option>}
+        <option value="select">{selectFromListLabel}</option>
+        {allowManualInput && <option value="manual">{enterManuallyLabel}</option>}
       </select>
 
       {mode === "select" ? (
@@ -724,7 +735,7 @@ const InstructorSelect = ({
           disabled={disabled}
           className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
         >
-          <option value="">(No instructor)</option>
+          <option value="">{noInstructorLabel}</option>
           {instructors.map((i) => (
             <option key={i.uid} value={i.displayName}>
               {i.displayName}
@@ -737,7 +748,7 @@ const InstructorSelect = ({
           type="text"
           value={resolvedValue}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Enter instructor name..."
+          placeholder={manualPlaceholder}
           disabled={disabled}
           className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
         />
@@ -752,6 +763,19 @@ const InstructorSelect = ({
 export default function TimetableClient() {
   const router = useRouter();
   const { user, loading } = useAuth();
+  const t = useTranslations("timetable");
+  const tSession = useTranslations("session");
+  const classTypeLabels: Record<ClassType, string> = {
+    adult: t("filterAdult"),
+    kids: t("filterKids"),
+    mixed: t("filterMixed"),
+  };
+  const filterTabLabels = {
+    all: t("filterAll"),
+    adult: t("filterAdult"),
+    kids: t("filterKids"),
+    mixed: t("filterMixed"),
+  };
 
   const [userDoc, setUserDoc] = useState<UserDoc | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -783,7 +807,7 @@ export default function TimetableClient() {
   const gridRef = useRef<WeeklyScheduleGridRef>(null);
 
   // Quick add form
-  const [title, setTitle] = useState("All Levels Gi");
+  const [title, setTitle] = useState(t("defaultClassTitle"));
   const [weekday, setWeekday] = useState<number>(1);
   const [startHHMM, setStartHHMM] = useState("07:00");
   const [durationMin, setDurationMin] = useState(60);
@@ -796,7 +820,7 @@ export default function TimetableClient() {
   const [modalWeekday, setModalWeekday] = useState<number>(1);
   const [modalStartHHMM, setModalStartHHMM] = useState("07:00");
   const [modalDurationMin, setModalDurationMin] = useState(60);
-  const [modalTitle, setModalTitle] = useState("All Levels Gi");
+  const [modalTitle, setModalTitle] = useState(t("defaultClassTitle"));
   const [modalInstructor, setModalInstructor] = useState("");
   const [modalClassType, setModalClassType] = useState<ClassType>("adult");
 
@@ -834,7 +858,7 @@ export default function TimetableClient() {
   const exportToPng = useCallback(async () => {
     const el = gridRef.current?.getGridElement();
     if (!el) {
-      setErr("Grid element not found");
+      setErr(t("errors.gridNotFound"));
       return;
     }
     setExporting(true);
@@ -854,7 +878,7 @@ export default function TimetableClient() {
 
       canvas.toBlob((blob: Blob | null) => {
         if (!blob) {
-          setErr("Failed to create PNG blob");
+          setErr(t("errors.pngFailed"));
           setExporting(false);
           return;
         }
@@ -870,16 +894,16 @@ export default function TimetableClient() {
         setExporting(false);
       }, "image/png");
     } catch (e: any) {
-      setErr(e?.message || "Failed to export PNG");
+      setErr(e?.message || t("errors.exportPngFailed"));
       setExporting(false);
     }
-  }, [weekStart]);
+  }, [weekStart, t]);
 
   // Export PDF
   const exportToPdf = useCallback(async () => {
     const el = gridRef.current?.getGridElement();
     if (!el) {
-      setErr("Grid element not found");
+      setErr(t("errors.gridNotFound"));
       return;
     }
     setExporting(true);
@@ -928,7 +952,7 @@ export default function TimetableClient() {
 
       setSuccessMsg("PDF exported!");
     } catch (e: any) {
-      setErr(e?.message || "Failed to export PDF");
+      setErr(e?.message || t("errors.exportPdfFailed"));
     } finally {
       setExporting(false);
     }
@@ -975,7 +999,7 @@ export default function TimetableClient() {
           if (registered) setMemberRegistered(true);
         }
       } catch (e: any) {
-        if (!cancelled) setErr(e?.message || "Failed to load profile.");
+        if (!cancelled) setErr(e?.message || t("errors.loadProfileFailed"));
       } finally {
         if (!cancelled) setProfileLoading(false);
       }
@@ -1026,7 +1050,7 @@ export default function TimetableClient() {
     setSuccessMsg("");
     try {
       const db = await waitForDb();
-      if (!db) throw new Error("Firestore not ready.");
+      if (!db) throw new Error(t("errors.firestoreNotReady"));
       const userRef = doc(db, "users", user.uid);
 
       const patch: any = { dojoId: dojo.id, dojoName: dojo.name ?? null, updatedAt: serverTimestamp() };
@@ -1052,7 +1076,7 @@ export default function TimetableClient() {
       setDojoSearchTerm("");
       setSuccessMsg(`Selected gym: ${dojo.name}`);
     } catch (e: any) {
-      setErr(e?.message || "Failed to select dojo.");
+      setErr(e?.message || t("errors.selectDojoFailed"));
     } finally {
       setBusy(false);
     }
@@ -1070,7 +1094,7 @@ export default function TimetableClient() {
         const rows = await loadTimetableClassesUnified(dojoId, db);
         if (!cancelled) setClasses(rows);
       } catch (e: any) {
-        if (!cancelled) setErr(e?.message || "Failed to load timetable.");
+        if (!cancelled) setErr(e?.message || t("errors.loadFailed"));
       } finally {
         if (!cancelled) setBusy(false);
       }
@@ -1253,7 +1277,7 @@ export default function TimetableClient() {
           setMyReservations(reservationsMap);
         }
       } catch (e: any) {
-        if (!cancelled) setErr(e?.message || "Failed to load sessions.");
+        if (!cancelled) setErr(e?.message || t("errors.loadSessionsFailed"));
       } finally {
         if (!cancelled) setDataLoading(false);
       }
@@ -1322,9 +1346,9 @@ export default function TimetableClient() {
       if (db) await touchTimetableMeta(db, dojoId, user?.uid);
 
       await refresh();
-      setSuccessMsg("Class created!");
+      setSuccessMsg(t("classCreated"));
     } catch (e: any) {
-      setErr(e?.message || "Create failed.");
+      setErr(e?.message || t("createFailed"));
     } finally {
       setBusy(false);
     }
@@ -1359,7 +1383,7 @@ export default function TimetableClient() {
       refresh().catch(() => {});
     } catch (e: any) {
       // ✅ 失敗時はロールバック
-      setErr(e?.message || "Delete failed.");
+      setErr(e?.message || t("deleteFailed"));
       await refresh();
     } finally {
       setBusy(false);
@@ -1379,10 +1403,10 @@ export default function TimetableClient() {
 
   const onEditSave = async () => {
     if (!dojoId || !editingClass) return;
-    const t = editTitle.trim();
-    if (!t) return setErr("Title required.");
-    if (!/^\d{1,2}:\d{2}$/.test(editStartHHMM.trim())) return setErr("Time must be HH:MM.");
-    if (editDurationMin < 15) return setErr("Duration >= 15.");
+    const editedTitle = editTitle.trim();
+    if (!editedTitle) return setErr(t("titleRequired"));
+    if (!/^\d{1,2}:\d{2}$/.test(editStartHHMM.trim())) return setErr(t("timeFormatInvalid"));
+    if (editDurationMin < 15) return setErr(t("durationAtLeast15"));
 
     setBusy(true);
     setErr("");
@@ -1398,7 +1422,7 @@ export default function TimetableClient() {
     };
 
     const nextSnapshot: TimetableSnapshot = {
-      title: t,
+      title: editedTitle,
       weekday: editWeekday,
       startMinute: hhmmToMinutes(editStartHHMM),
       durationMinute: editDurationMin,
@@ -1413,7 +1437,7 @@ export default function TimetableClient() {
         c.id === editedId
           ? {
               ...c,
-              title: t,
+              title: editedTitle,
               weekday: editWeekday,
               startMinute: hhmmToMinutes(editStartHHMM),
               durationMinute: editDurationMin,
@@ -1430,7 +1454,7 @@ export default function TimetableClient() {
 
     try {
       await updateTimetableClass(dojoId, editedId, {
-        title: t,
+        title: editedTitle,
         weekday: editWeekday,
         startMinute: hhmmToMinutes(editStartHHMM),
         durationMinute: editDurationMin,
@@ -1450,19 +1474,19 @@ export default function TimetableClient() {
         await touchTimetableMeta(db, dojoId, user?.uid);
 
         if (synced > 0) {
-          setSuccessMsg(`Updated: ${t} (synced ${synced} sessions)`);
+          setSuccessMsg(`Updated: ${editedTitle} (synced ${synced} sessions)`);
         } else {
-          setSuccessMsg(`Updated: ${t}`);
+          setSuccessMsg(`Updated: ${editedTitle}`);
         }
       } else {
-        setSuccessMsg(`Updated: ${t}`);
+        setSuccessMsg(`Updated: ${editedTitle}`);
       }
 
       // ✅ バックグラウンドでサーバーからも再取得して整合性を確認
       refresh().catch(() => {});
     } catch (e: any) {
       // ✅ API が失敗した場合はロールバック（サーバーから再取得）
-      setErr(e?.message || "Update failed.");
+      setErr(e?.message || t("updateFailed"));
       await refresh();
     } finally {
       setBusy(false);
@@ -1490,7 +1514,7 @@ export default function TimetableClient() {
       });
       router.push(`/dojos/${encodeURIComponent(dojoId)}/sessions/${encodeURIComponent(session.id)}`);
     } catch (e: any) {
-      setErr(e?.message || "Failed to open session.");
+      setErr(e?.message || t("errors.openSessionFailed"));
     } finally {
       setBusy(false);
     }
@@ -1500,7 +1524,7 @@ export default function TimetableClient() {
     setModalWeekday(args.weekday);
     setModalStartHHMM(minuteToHHMM(args.startMinute));
     setModalDurationMin(60);
-    setModalTitle("All Levels Gi");
+    setModalTitle(t("defaultClassTitle"));
     setModalInstructor("");
     setModalClassType("adult");
     setModalDateKey(args.dateKey);
@@ -1511,17 +1535,17 @@ export default function TimetableClient() {
   const onModalCreate = async () => {
     const db = await waitForDb();
     if (!db || !dojoId || !user) return;
-    const t = modalTitle.trim();
-    if (!t) return setErr("Title required.");
-    if (!/^\d{1,2}:\d{2}$/.test(modalStartHHMM.trim())) return setErr("Time must be HH:MM.");
-    if (modalDurationMin < 15) return setErr("Duration >= 15.");
+    const modalTitleTrimmed = modalTitle.trim();
+    if (!modalTitleTrimmed) return setErr(t("titleRequired"));
+    if (!/^\d{1,2}:\d{2}$/.test(modalStartHHMM.trim())) return setErr(t("timeFormatInvalid"));
+    if (modalDurationMin < 15) return setErr(t("durationAtLeast15"));
 
     setBusy(true);
     setErr("");
     setSuccessMsg("");
     try {
       const classId = await createTimetableClass(dojoId, {
-        title: t,
+        title: modalTitleTrimmed,
         weekday: modalWeekday,
         startMinute: hhmmToMinutes(modalStartHHMM),
         durationMinute: modalDurationMin,
@@ -1538,7 +1562,7 @@ export default function TimetableClient() {
         await getOrCreateSession(db, {
           dojoId,
           timetableClassId: classId,
-          title: t,
+          title: modalTitleTrimmed,
           weekday: modalWeekday,
           startMinute: hhmmToMinutes(modalStartHHMM),
           durationMinute: modalDurationMin,
@@ -1556,7 +1580,7 @@ export default function TimetableClient() {
 
       await refresh();
     } catch (e: any) {
-      setErr(e?.message || "Create failed.");
+      setErr(e?.message || t("createFailed"));
     } finally {
       setBusy(false);
     }
@@ -1642,7 +1666,7 @@ export default function TimetableClient() {
       setSelectedSession(null);
       setSuccessMsg(`Reserved: ${selectedSession.title} (${selectedDateKey || selectedSession.dateKey})`);
     } catch (e: any) {
-      setErr((e as any)?.code === "permission-denied" ? "Permission denied." : (e as any)?.message || "Failed to reserve.");
+      setErr((e as any)?.code === "permission-denied" ? t("permissionDenied") : (e as any)?.message || t("reserveFailed"));
     } finally {
       setBusy(false);
     }
@@ -1661,9 +1685,9 @@ export default function TimetableClient() {
         m.delete(sessionId);
         return m;
       });
-      setSuccessMsg("Reservation cancelled.");
+      setSuccessMsg(t("reservationCancelled"));
     } catch (e: any) {
-      setErr(e?.code === "permission-denied" ? "Permission denied." : e?.message || "Failed to cancel.");
+      setErr(e?.code === "permission-denied" ? t("permissionDenied") : e?.message || t("cancelFailed"));
     } finally {
       setBusy(false);
     }
@@ -1708,8 +1732,8 @@ export default function TimetableClient() {
         <div className="mx-auto max-w-3xl p-4 sm:p-6 space-y-4 pb-20 md:pb-6">
           <Card>
             <div className="px-5 py-4 sm:px-6 sm:py-5">
-              <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">Timetable</h1>
-              <p className="mt-1 text-sm text-slate-500">Select a gym to view the schedule.</p>
+              <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">{t("title")}</h1>
+              <p className="mt-1 text-sm text-slate-500">{t("dojoIdMissing")}</p>
             </div>
           </Card>
 
@@ -1719,16 +1743,16 @@ export default function TimetableClient() {
           <Card>
             <div className="px-5 py-5 sm:px-6 sm:py-6 space-y-4">
               <label className="space-y-1 block">
-                <div className="text-sm font-semibold text-slate-700">Search Gym</div>
+                <div className="text-sm font-semibold text-slate-700">{t("searchGym")}</div>
                 <input
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                  placeholder="Enter gym name..."
+                  placeholder={t("searchGymPlaceholder")}
                   value={dojoSearchTerm}
                   onChange={(e) => setDojoSearchTerm(e.target.value)}
                 />
               </label>
 
-              {dojoSearchBusy && <div className="text-sm text-slate-500">Searching...</div>}
+              {dojoSearchBusy && <div className="text-sm text-slate-500">{t("searching")}</div>}
 
               {dojoCandidates.length > 0 && (
                 <div className="grid gap-2">
@@ -1780,7 +1804,7 @@ export default function TimetableClient() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 {dojoName && <p className="text-sm font-medium text-blue-600 mb-1">{dojoName}</p>}
-                <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">Timetable</h1>
+                <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">{t("title")}</h1>
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-600">
                   {viewPill}
                   {!isStaff && userName && (
@@ -1792,15 +1816,15 @@ export default function TimetableClient() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <GhostBtn onClick={() => setWeekStart((p) => addDays(p, -7))}>← Prev</GhostBtn>
-                <GhostBtn onClick={() => setWeekStart(startOfToday(new Date()))}>Today</GhostBtn>
-                <GhostBtn onClick={() => setWeekStart((p) => addDays(p, 7))}>Next →</GhostBtn>
+                <GhostBtn onClick={() => setWeekStart((p) => addDays(p, -7))}>{t("prev")}</GhostBtn>
+                <GhostBtn onClick={() => setWeekStart(startOfToday(new Date()))}>{t("today")}</GhostBtn>
+                <GhostBtn onClick={() => setWeekStart((p) => addDays(p, 7))}>{t("next")}</GhostBtn>
               </div>
             </div>
           </div>
         </Card>
 
-        {memberRegistered && <Alert kind="success">Automatically registered as a member.</Alert>}
+        {memberRegistered && <Alert kind="success">{t("autoRegistered")}</Alert>}
         {err && <Alert kind="error">{err}</Alert>}
         {successMsg && <Alert kind="success">{successMsg}</Alert>}
 
@@ -1809,15 +1833,15 @@ export default function TimetableClient() {
           <div className="px-5 py-4 sm:px-6 sm:py-5">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <div className="text-sm font-semibold text-slate-700 mb-2">Filter by Class Type</div>
-                <FilterTabs value={filterType} onChange={setFilterType} />
+                <div className="text-sm font-semibold text-slate-700 mb-2">{t("filterByClassType")}</div>
+                <FilterTabs value={filterType} onChange={setFilterType} labels={filterTabLabels} />
               </div>
               <div className="flex flex-wrap gap-2">
                 <OutlineBtn onClick={exportToPng} disabled={exporting}>
-                  {exporting ? "Exporting..." : "📷 Export PNG"}
+                  {exporting ? t("exporting") : t("exportPng")}
                 </OutlineBtn>
                 <OutlineBtn onClick={exportToPdf} disabled={exporting}>
-                  {exporting ? "Exporting..." : "📄 Export PDF"}
+                  {exporting ? t("exporting") : t("exportPdf")}
                 </OutlineBtn>
               </div>
             </div>
@@ -1853,23 +1877,23 @@ export default function TimetableClient() {
                   </div>
                 </div>
                 <PrimaryBtn disabled={!canCreate || busy} onClick={onCreate}>
-                  {busy ? "Working..." : "Create Class Only"}
+                  {busy ? t("working") : t("createClassOnly")}
                 </PrimaryBtn>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
                 <label className="space-y-1">
-                  <div className="text-sm font-semibold text-slate-700">Title</div>
+                  <div className="text-sm font-semibold text-slate-700">{t("titleLabel")}</div>
                   <input
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Title"
+                    placeholder={t("titlePlaceholder")}
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
                   />
                 </label>
 
                 <label className="space-y-1">
-                  <div className="text-sm font-semibold text-slate-700">Weekday</div>
+                  <div className="text-sm font-semibold text-slate-700">{t("weekdayLabel")}</div>
                   <select
                     value={weekday}
                     onChange={(e) => setWeekday(Number(e.target.value))}
@@ -1884,7 +1908,7 @@ export default function TimetableClient() {
                 </label>
 
                 <label className="space-y-1">
-                  <div className="text-sm font-semibold text-slate-700">Start</div>
+                  <div className="text-sm font-semibold text-slate-700">{t("startLabel")}</div>
                   <input
                     value={startHHMM}
                     onChange={(e) => setStartHHMM(e.target.value)}
@@ -1894,7 +1918,7 @@ export default function TimetableClient() {
                 </label>
 
                 <label className="space-y-1">
-                  <div className="text-sm font-semibold text-slate-700">Duration (min)</div>
+                  <div className="text-sm font-semibold text-slate-700">{t("durationMin")}</div>
                   <input
                     value={durationMin}
                     onChange={(e) => setDurationMin(Number(e.target.value || "0"))}
@@ -1905,13 +1929,13 @@ export default function TimetableClient() {
                 </label>
 
                 <label className="space-y-1">
-                  <div className="text-sm font-semibold text-slate-700">Instructor</div>
-                  <InstructorSelect instructors={instructors} value={instructor} onChange={setInstructor} disabled={busy} />
+                  <div className="text-sm font-semibold text-slate-700">{t("instructorLabel")}</div>
+                  <InstructorSelect instructors={instructors} value={instructor} onChange={setInstructor} disabled={busy} selectFromListLabel={tSession("selectFromList")} enterManuallyLabel={tSession("enterManually")} manualPlaceholder={tSession("enterInstructorName")} noInstructorLabel={t("noInstructorOption")} />
                 </label>
 
                 <label className="space-y-1">
-                  <div className="text-sm font-semibold text-slate-700">Class Type</div>
-                  <ClassTypeSelect value={classType} onChange={setClassType} disabled={busy} />
+                  <div className="text-sm font-semibold text-slate-700">{t("classTypeLabel")}</div>
+                  <ClassTypeSelect value={classType} onChange={setClassType} disabled={busy} labels={classTypeLabels} />
                 </label>
               </div>
             </div>
@@ -1931,7 +1955,7 @@ export default function TimetableClient() {
               <Card>
                 <div className="px-5 py-5 sm:px-6 sm:py-6 space-y-3">
                   <div className="text-base font-semibold text-slate-900">
-                    My Reservations <span className="text-slate-500 font-medium">({myReservations.size})</span>
+                    {t("myReservations")} <span className="text-slate-500 font-medium">({myReservations.size})</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {Array.from(myReservations.entries()).map(([sid]) => {
@@ -1968,9 +1992,9 @@ export default function TimetableClient() {
 
             {!dataLoading && (
               <div className="text-sm text-slate-600">
-                Status: <span className="font-semibold text-blue-700">Blue</span> = Available ·{" "}
-                <span className="font-semibold text-emerald-700">Green</span> = Reserved ·{" "}
-                <span className="text-slate-500">Gray</span> = Past
+                {t("statusLegend")} <span className="font-semibold text-blue-700">{t("statusBlue")}</span> {t("statusBlueDesc")} ·{" "}
+                <span className="font-semibold text-emerald-700">{t("statusGreen")}</span> {t("statusGreenDesc")} ·{" "}
+                <span className="text-slate-500">{t("statusGray")}</span> {t("statusGrayDesc")}
               </div>
             )}
           </>
@@ -1979,7 +2003,7 @@ export default function TimetableClient() {
         {/* Grid */}
         <Card>
           <div className="px-5 py-5 sm:px-6 sm:py-6 space-y-3">
-            {busy && <div className="text-sm text-slate-500">Loading…</div>}
+            {busy && <div className="text-sm text-slate-500">{t("loading")}</div>}
             <WeeklyScheduleGrid
               ref={gridRef}
               weekStart={weekStart}
@@ -1998,8 +2022,8 @@ export default function TimetableClient() {
         {isStaff && (
           <Card>
             <div className="px-5 py-5 sm:px-6 sm:py-6 space-y-3">
-              <div className="text-base font-semibold text-slate-900">Registered Classes</div>
-              {classes.length === 0 && <div className="text-sm text-slate-500">No classes yet.</div>}
+              <div className="text-base font-semibold text-slate-900">{t("registeredClasses")}</div>
+              {classes.length === 0 && <div className="text-sm text-slate-500">{t("noClasses")}</div>}
 
               <div className="grid gap-2">
                 {classes.map((c) => {
@@ -2059,9 +2083,9 @@ export default function TimetableClient() {
               <div className="px-5 py-4 sm:px-6 sm:py-5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-lg font-semibold text-slate-900">Create Class + Sessions</div>
+                    <div className="text-lg font-semibold text-slate-900">{t("createClassSessions")}</div>
                     <div className="mt-1 text-sm text-slate-500">
-                      Starting from: <span className="font-semibold text-slate-800">{modalDateKey}</span> (
+                      {t("startingFrom")} <span className="font-semibold text-slate-800">{modalDateKey}</span> (
                       {WEEKDAYS.find((w) => w.value === modalWeekday)?.label})
                     </div>
                   </div>
@@ -2070,7 +2094,7 @@ export default function TimetableClient() {
 
                 <div className="mt-5 space-y-4">
                   <label className="space-y-1 block">
-                    <div className="text-sm font-semibold text-slate-700">Class Title</div>
+                    <div className="text-sm font-semibold text-slate-700">{t("classTitle")}</div>
                     <input
                       value={modalTitle}
                       onChange={(e) => setModalTitle(e.target.value)}
@@ -2080,7 +2104,7 @@ export default function TimetableClient() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <label className="space-y-1">
-                      <div className="text-sm font-semibold text-slate-700">Weekday</div>
+                      <div className="text-sm font-semibold text-slate-700">{t("weekdayLabel")}</div>
                       <select
                         value={modalWeekday}
                         onChange={(e) => setModalWeekday(Number(e.target.value))}
@@ -2095,7 +2119,7 @@ export default function TimetableClient() {
                     </label>
 
                     <label className="space-y-1">
-                      <div className="text-sm font-semibold text-slate-700">Start Time</div>
+                      <div className="text-sm font-semibold text-slate-700">{t("startTimeLabel")}</div>
                       <input
                         value={modalStartHHMM}
                         onChange={(e) => setModalStartHHMM(e.target.value)}
@@ -2105,7 +2129,7 @@ export default function TimetableClient() {
                     </label>
 
                     <label className="space-y-1">
-                      <div className="text-sm font-semibold text-slate-700">Duration (min)</div>
+                      <div className="text-sm font-semibold text-slate-700">{t("durationMin")}</div>
                       <input
                         value={modalDurationMin}
                         onChange={(e) => setModalDurationMin(Number(e.target.value || "0"))}
@@ -2116,19 +2140,19 @@ export default function TimetableClient() {
                   </div>
 
                   <label className="space-y-1 block">
-                    <div className="text-sm font-semibold text-slate-700">Class Type</div>
-                    <ClassTypeSelect value={modalClassType} onChange={setModalClassType} disabled={busy} />
+                    <div className="text-sm font-semibold text-slate-700">{t("classTypeLabel")}</div>
+                    <ClassTypeSelect value={modalClassType} onChange={setModalClassType} disabled={busy} labels={classTypeLabels} />
                   </label>
 
                   <label className="space-y-1 block">
-                    <div className="text-sm font-semibold text-slate-700">Instructor (optional)</div>
-                    <InstructorSelect instructors={instructors} value={modalInstructor} onChange={setModalInstructor} disabled={busy} />
+                    <div className="text-sm font-semibold text-slate-700">{t("instructorOptional")}</div>
+                    <InstructorSelect instructors={instructors} value={modalInstructor} onChange={setModalInstructor} disabled={busy} selectFromListLabel={tSession("selectFromList")} enterManuallyLabel={tSession("enterManually")} manualPlaceholder={tSession("enterInstructorName")} noInstructorLabel={t("noInstructorOption")} />
                   </label>
 
                   <div className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
-                    <div className="text-sm font-semibold text-slate-800">🔁 Repeat Sessions</div>
+                    <div className="text-sm font-semibold text-slate-800">{t("repeatSessions")}</div>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-600">
-                      <span>Create sessions for</span>
+                      <span>{t("createSessionsFor")}</span>
                       <select
                         value={repeatWeeks}
                         onChange={(e) => setRepeatWeeks(Number(e.target.value))}
@@ -2145,9 +2169,9 @@ export default function TimetableClient() {
                   </div>
 
                   <div className="flex justify-end gap-2">
-                    <OutlineBtn onClick={() => setModalOpen(false)}>Cancel</OutlineBtn>
+                    <OutlineBtn onClick={() => setModalOpen(false)}>{t("cancel")}</OutlineBtn>
                     <PrimaryBtn disabled={busy} onClick={onModalCreate}>
-                      {busy ? "Creating..." : `Create Class + ${repeatWeeks} Session(s)`}
+                      {busy ? t("creatingDots") : t("createClassPlusSessions", { count: repeatWeeks })}
                     </PrimaryBtn>
                   </div>
                 </div>
@@ -2163,15 +2187,15 @@ export default function TimetableClient() {
               <div className="px-5 py-4 sm:px-6 sm:py-5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-lg font-semibold text-slate-900">Edit Class</div>
-                    <div className="mt-1 text-sm text-slate-500">Update title, time, duration, instructor, or type</div>
+                    <div className="text-lg font-semibold text-slate-900">{t("editClass")}</div>
+                    <div className="mt-1 text-sm text-slate-500">{t("updateLabelsDesc")}</div>
                   </div>
                   <OutlineBtn onClick={() => setEditModalOpen(false)}>✕</OutlineBtn>
                 </div>
 
                 <div className="mt-5 space-y-4">
                   <label className="space-y-1 block">
-                    <div className="text-sm font-semibold text-slate-700">Class Title</div>
+                    <div className="text-sm font-semibold text-slate-700">{t("classTitle")}</div>
                     <input
                       value={editTitle}
                       onChange={(e) => setEditTitle(e.target.value)}
@@ -2181,7 +2205,7 @@ export default function TimetableClient() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <label className="space-y-1">
-                      <div className="text-sm font-semibold text-slate-700">Weekday</div>
+                      <div className="text-sm font-semibold text-slate-700">{t("weekdayLabel")}</div>
                       <select
                         value={editWeekday}
                         onChange={(e) => setEditWeekday(Number(e.target.value))}
@@ -2196,7 +2220,7 @@ export default function TimetableClient() {
                     </label>
 
                     <label className="space-y-1">
-                      <div className="text-sm font-semibold text-slate-700">Start Time</div>
+                      <div className="text-sm font-semibold text-slate-700">{t("startTimeLabel")}</div>
                       <input
                         value={editStartHHMM}
                         onChange={(e) => setEditStartHHMM(e.target.value)}
@@ -2206,7 +2230,7 @@ export default function TimetableClient() {
                     </label>
 
                     <label className="space-y-1">
-                      <div className="text-sm font-semibold text-slate-700">Duration (min)</div>
+                      <div className="text-sm font-semibold text-slate-700">{t("durationMin")}</div>
                       <input
                         value={editDurationMin}
                         onChange={(e) => setEditDurationMin(Number(e.target.value || "0"))}
@@ -2217,19 +2241,19 @@ export default function TimetableClient() {
                   </div>
 
                   <label className="space-y-1 block">
-                    <div className="text-sm font-semibold text-slate-700">Class Type</div>
-                    <ClassTypeSelect value={editClassType} onChange={setEditClassType} disabled={busy} />
+                    <div className="text-sm font-semibold text-slate-700">{t("classTypeLabel")}</div>
+                    <ClassTypeSelect value={editClassType} onChange={setEditClassType} disabled={busy} labels={classTypeLabels} />
                   </label>
 
                   <label className="space-y-1 block">
-                    <div className="text-sm font-semibold text-slate-700">Instructor (optional)</div>
-                    <InstructorSelect instructors={instructors} value={editInstructor} onChange={setEditInstructor} disabled={busy} />
+                    <div className="text-sm font-semibold text-slate-700">{t("instructorOptional")}</div>
+                    <InstructorSelect instructors={instructors} value={editInstructor} onChange={setEditInstructor} disabled={busy} selectFromListLabel={tSession("selectFromList")} enterManuallyLabel={tSession("enterManually")} manualPlaceholder={tSession("enterInstructorName")} noInstructorLabel={t("noInstructorOption")} />
                   </label>
 
                   <div className="flex justify-end gap-2">
-                    <OutlineBtn onClick={() => setEditModalOpen(false)}>Cancel</OutlineBtn>
+                    <OutlineBtn onClick={() => setEditModalOpen(false)}>{t("cancel")}</OutlineBtn>
                     <PrimaryBtn disabled={busy} onClick={onEditSave}>
-                      {busy ? "Saving..." : "Save Changes"}
+                      {busy ? t("saving") : t("saveChanges")}
                     </PrimaryBtn>
                   </div>
                 </div>
@@ -2243,22 +2267,22 @@ export default function TimetableClient() {
           <div onClick={() => setDeleteConfirmOpen(false)} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-3xl border border-rose-200 bg-white shadow-xl">
               <div className="px-5 py-4 sm:px-6 sm:py-5">
-                <div className="text-lg font-semibold text-rose-700">Delete Class?</div>
+                <div className="text-lg font-semibold text-rose-700">{t("deleteClass")}?</div>
                 <div className="mt-3 text-sm text-slate-700">
-                  Are you sure you want to delete <span className="font-semibold">"{deletingClass.title}"</span>?
+                  {t("deleteConfirmQuestion", { title: deletingClass.title })}
                 </div>
                 <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-                  This will only delete the timetable template. Existing sessions will remain.
+                  {t("deleteOnlyTemplate")}
                 </div>
                 <div className="mt-5 flex justify-end gap-2">
-                  <OutlineBtn onClick={() => setDeleteConfirmOpen(false)}>Cancel</OutlineBtn>
+                  <OutlineBtn onClick={() => setDeleteConfirmOpen(false)}>{t("cancel")}</OutlineBtn>
                   <button
                     type="button"
                     disabled={busy}
                     onClick={onConfirmDelete}
                     className="rounded-full border border-rose-200 bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {busy ? "Deleting..." : "Delete Class"}
+                    {busy ? t("deleting") : t("deleteClass")}
                   </button>
                 </div>
               </div>
@@ -2279,8 +2303,8 @@ export default function TimetableClient() {
                     <>
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-lg font-semibold text-slate-900">{reserved ? "Reservation" : "Reserve Class"}</div>
-                          <div className="mt-1 text-sm text-slate-500">Confirm or cancel your reservation</div>
+                          <div className="text-lg font-semibold text-slate-900">{reserved ? "Reservation" : t("reserve")}</div>
+                          <div className="mt-1 text-sm text-slate-500">{t("confirmOrCancelReservation")}</div>
                         </div>
                         <OutlineBtn onClick={() => setReserveModalOpen(false)}>✕</OutlineBtn>
                       </div>
@@ -2302,13 +2326,13 @@ export default function TimetableClient() {
                             {minuteToHHMM(selectedSession.startMinute + selectedSession.durationMinute)}
                           </div>
                           <div>⏱ {selectedSession.durationMinute} min</div>
-                          {selectedSession.instructor && <div>👤 Instructor: {resolveInstructorName(selectedSession.instructor)}</div>}
+                          {selectedSession.instructor && <div>👤 {t("instructorLabel")}: {resolveInstructorName(selectedSession.instructor)}</div>}
                         </div>
-                        {past && <div className="mt-3 text-xs text-slate-500">This class is in the past.</div>}
+                        {past && <div className="mt-3 text-xs text-slate-500">{t("thisClassPast")}</div>}
                       </div>
 
                       <div className="mt-5 flex justify-end gap-2">
-                        <OutlineBtn onClick={() => setReserveModalOpen(false)}>Close</OutlineBtn>
+                        <OutlineBtn onClick={() => setReserveModalOpen(false)}>{t("close")}</OutlineBtn>
                         {reserved ? (
                           <button
                             onClick={async () => {
@@ -2319,7 +2343,7 @@ export default function TimetableClient() {
                             disabled={busy || past}
                             className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {busy ? "Working..." : "Cancel Reservation"}
+                            {busy ? t("working") : t("cancelReservation")}
                           </button>
                         ) : (
                           <button
@@ -2327,7 +2351,7 @@ export default function TimetableClient() {
                             disabled={busy || past}
                             className="rounded-full border border-emerald-200 bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {busy ? "Reserving..." : "Reserve"}
+                            {busy ? t("reserving") : t("reserve")}
                           </button>
                         )}
                       </div>

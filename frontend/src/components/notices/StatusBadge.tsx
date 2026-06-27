@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import { useTranslations } from 'next-intl';
 
 type Props = {
   status?: string | null;
@@ -9,6 +10,7 @@ type Props = {
 };
 
 export const StatusBadge: React.FC<Props> = ({ status, title, className, style }) => {
+  const t = useTranslations('notices');
   const raw = String(status ?? '').trim();
   if (!raw) return null;
 
@@ -34,19 +36,19 @@ export const StatusBadge: React.FC<Props> = ({ status, title, className, style }
 
   const config = {
     active: {
-      label: 'Active',
+      label: t('filterStatusActive'),
       dotColor: '#22c55e',
       bgColor: '#f0fdf4',
       textColor: '#166534',
     },
     upcoming: {
-      label: 'Upcoming',
+      label: t('filterStatusUpcoming'),
       dotColor: '#f59e0b',
       bgColor: '#fffbeb',
       textColor: '#92400e',
     },
     complete: {
-      label: 'Complete',
+      label: t('filterStatusComplete'),
       dotColor: '#94a3b8',
       bgColor: '#f8fafc',
       textColor: '#64748b',

@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import { db } from "@/firebase";
 import { useDojoName } from "@/hooks/useDojoName";
@@ -158,6 +159,7 @@ export default function AttendanceDashboard() {
   const router = useRouter();
   const params = useParams();
   const { user, loading: authLoading } = useAuth();
+  const t = useTranslations("attendance");
 
   const dojoId = (params?.dojoId as string) || "";
   const { dojoName } = useDojoName(dojoId);
@@ -194,7 +196,7 @@ export default function AttendanceDashboard() {
           userSnap.exists() ? (userSnap.data() as UserDocBase) : null
         );
         if (!staffCheck) {
-          setError("Staff access required.");
+          setError(t("staffAccessRequired"));
           setLoading(false);
           return;
         }
@@ -426,7 +428,7 @@ export default function AttendanceDashboard() {
         <Navigation />
         <main className="max-w-4xl mx-auto px-4 py-8 pb-24">
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-            Staff access required.
+            {t("staffAccessRequired")}
           </div>
         </main>
         <BottomNavigation />
@@ -448,13 +450,13 @@ export default function AttendanceDashboard() {
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-            Back to Home
+            {t("backToHome")}
           </button>
 
           <div className="flex items-start justify-between gap-4">
             <div>
               {dojoName && <p className="text-sm font-medium text-blue-600 mb-1">{dojoName}</p>}
-              <h1 className="text-2xl font-bold text-gray-900">Attendance Dashboard</h1>
+              <h1 className="text-2xl font-bold text-gray-900">{t("title")}</h1>
             </div>
             <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
               {(["4w", "8w", "12w"] as const).map((p) => (
@@ -465,7 +467,7 @@ export default function AttendanceDashboard() {
                     period === p ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
                   }`}
                 >
-                  {p === "4w" ? "4 weeks" : p === "8w" ? "8 weeks" : "12 weeks"}
+                  {p === "4w" ? t("weeks4") : p === "8w" ? t("weeks8") : t("weeks12")}
                 </button>
               ))}
             </div>
@@ -478,14 +480,14 @@ export default function AttendanceDashboard() {
 
         {/* Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <StatCard icon="📊" value={totalAttendancePeriod} label="Total Check-ins" sub={`Last ${periodWeeks} weeks`} />
-          <StatCard icon="👥" value={uniqueAttendersPeriod} label="Unique Members" sub={`of ${activeMembers} active`} />
-          <StatCard icon="📈" value={avgPerWeek} label="Avg / Week" color="text-blue-600" />
+          <StatCard icon="📊" value={totalAttendancePeriod} label={t("totalCheckIns")} sub={t("lastWeeks", { weeks: periodWeeks })} />
+          <StatCard icon="👥" value={uniqueAttendersPeriod} label={t("uniqueMembers")} sub={t("ofActive", { count: activeMembers })} />
+          <StatCard icon="📈" value={avgPerWeek} label={t("avgPerWeek")} color="text-blue-600" />
           <StatCard
             icon="⚠️"
             value={retentionAlerts.length}
-            label="At Risk"
-            sub="14+ days absent"
+            label={t("atRisk")}
+            sub={t("daysAbsent")}
             color={retentionAlerts.length > 0 ? "text-red-600" : "text-green-600"}
           />
         </div>
@@ -495,19 +497,19 @@ export default function AttendanceDashboard() {
           {/* Weekly Trend */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-4">
-              Weekly Trend
+              {t("weeklyTrend")}
             </h3>
             {weeklyTrend.length > 0 ? (
               <BarChart data={weeklyTrend} maxBarHeight={100} />
             ) : (
-              <p className="text-gray-400 text-sm text-center py-8">No data yet.</p>
+              <p className="text-gray-400 text-sm text-center py-8">{t("noData")}</p>
             )}
           </div>
 
           {/* Weekday Distribution */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-4">
-              Busiest Days
+              {t("busiestDays")}
             </h3>
             <BarChart data={weekdayDist} maxBarHeight={100} />
           </div>
@@ -518,10 +520,10 @@ export default function AttendanceDashboard() {
           {/* Top Members */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-4">
-              Top Members
+              {t("topMembers")}
             </h3>
             {topMembers.length === 0 ? (
-              <p className="text-gray-400 text-sm text-center py-4">No attendance data.</p>
+              <p className="text-gray-400 text-sm text-center py-4">{t("noAttendance")}</p>
             ) : (
               <div className="space-y-2">
                 {topMembers.map((m, i) => {
@@ -555,10 +557,10 @@ export default function AttendanceDashboard() {
           {/* Popular Classes */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-4">
-              Popular Classes
+              {t("popularClasses")}
             </h3>
             {popularClasses.length === 0 ? (
-              <p className="text-gray-400 text-sm text-center py-4">No class data.</p>
+              <p className="text-gray-400 text-sm text-center py-4">{t("noClasses")}</p>
             ) : (
               <div className="space-y-3">
                 {popularClasses.map((c, i) => {
@@ -589,10 +591,10 @@ export default function AttendanceDashboard() {
         {retentionAlerts.length > 0 && (
           <div className="bg-white rounded-2xl shadow-sm border border-red-200 p-6">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-red-500 mb-4">
-              ⚠️ Retention Alerts — Members at Risk
+              {t("retentionAlertsTitle")}
             </h3>
             <p className="text-sm text-gray-500 mb-4">
-              These active members haven't attended in 14+ days. Consider reaching out.
+              {t("retentionAlertsDesc")}
             </p>
             <div className="space-y-2">
               {retentionAlerts.map((a) => {
@@ -612,8 +614,8 @@ export default function AttendanceDashboard() {
                       </span>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-bold text-red-600">{a.daysMissing} days</p>
-                      <p className="text-xs text-gray-400">absent</p>
+                      <p className="text-sm font-bold text-red-600">{t("daysCount", { count: a.daysMissing })}</p>
+                      <p className="text-xs text-gray-400">{t("absent")}</p>
                     </div>
                     <button
                       onClick={() =>
@@ -623,7 +625,7 @@ export default function AttendanceDashboard() {
                       }
                       className="text-blue-600 hover:text-blue-800 text-sm font-medium flex-shrink-0"
                     >
-                      View →
+                      {t("view")}
                     </button>
                   </div>
                 );

@@ -1,0 +1,229 @@
+{
+  "_README": "このtuitionネームスペースを messages/ja.json と messages/en.json にそれぞれマージしてください",
+
+  "ja": {
+    "tuition": {
+      "status": {
+        "active": "支払い中",
+        "past_due": "支払い遅延",
+        "canceled": "解約済み",
+        "incomplete": "手続き中",
+        "none": "未加入"
+      },
+      "payments": {
+        "back": "設定に戻る",
+        "title": "決済の受け取り設定",
+        "subtitle": "会員から月謝を受け取るためのStripeアカウントを設定します",
+        "loading": "読み込み中...",
+        "statusTitle": "受け取りアカウント",
+        "status": {
+          "active": "有効",
+          "pending": "設定中",
+          "none": "未設定"
+        },
+        "checks": {
+          "charges": "決済の受け取りが有効です",
+          "payouts": "銀行口座への入金"
+        },
+        "explainer": "Stripeの安全なオンボーディングで本人確認と銀行口座の登録を行います。所要時間は5〜10分程度です。月謝は道場のStripeアカウントに直接入金されます。",
+        "countryLabel": "道場の所在国",
+        "countries": { "CA": "カナダ", "JP": "日本", "US": "アメリカ" },
+        "startOnboarding": "受け取り設定を開始",
+        "continueOnboarding": "設定を続ける",
+        "updateAccount": "アカウント情報を更新",
+        "managePlans": "月謝プランを管理",
+        "redirecting": "Stripeへ移動中...",
+        "onboardedSuccess": "決済の受け取り設定が完了しました!月謝プランを作成しましょう。",
+        "stripeNote": "決済はStripeにより安全に処理されます。カード情報がこのアプリに保存されることはありません。",
+        "errors": {
+          "loadFailed": "ステータスの取得に失敗しました",
+          "onboardFailed": "オンボーディングの開始に失敗しました"
+        }
+      },
+      "manage": {
+        "back": "設定に戻る",
+        "title": "月謝管理",
+        "connectSettings": "受け取り設定",
+        "loading": "読み込み中...",
+        "stats": {
+          "paying": "支払い中",
+          "pastDue": "支払い遅延",
+          "notEnrolled": "未加入"
+        },
+        "plansTitle": "月謝プラン",
+        "newPlan": "+ 新規プラン",
+        "closeForm": "閉じる",
+        "noPlans": "プランがまだありません。「新規プラン」から作成してください。",
+        "archive": "アーカイブ",
+        "confirmArchive": "「{name}」をアーカイブしますか?既存の加入者への請求は継続され、新規加入のみ停止されます。",
+        "planCreated": "プランを作成しました",
+        "intervals": { "month": "月", "week": "週", "year": "年" },
+        "form": {
+          "name": "プラン名",
+          "namePlaceholder": "一般会員 月謝",
+          "amount": "金額",
+          "interval": "請求間隔",
+          "description": "説明(任意)",
+          "descriptionPlaceholder": "週何回でも参加可能",
+          "create": "プランを作成",
+          "creating": "作成中..."
+        },
+        "membersTitle": "会員の支払い状況",
+        "table": {
+          "member": "会員",
+          "plan": "プラン",
+          "status": "ステータス",
+          "nextPayment": "次回請求日"
+        },
+        "cancelScheduled": "期末で解約予定",
+        "cancelMember": "解約する",
+        "confirmCancelMember": "{name} さんの月謝サブスクを現在の請求期間の終了時に解約しますか?",
+        "memberCanceled": "期末での解約を設定しました",
+        "noMembers": "アクティブな会員がいません",
+        "errors": {
+          "loadFailed": "データの取得に失敗しました",
+          "invalidForm": "プラン名と正しい金額を入力してください",
+          "createFailed": "プランの作成に失敗しました",
+          "archiveFailed": "アーカイブに失敗しました",
+          "cancelFailed": "解約処理に失敗しました"
+        }
+      },
+      "member": {
+        "title": "月謝のお支払い",
+        "loading": "読み込み中...",
+        "checkoutSuccess": "お支払い手続きが完了しました!反映まで数秒かかる場合があります。",
+        "currentPlan": "現在のプラン",
+        "statusActive": "支払い中",
+        "statusPastDue": "支払い遅延",
+        "renewsOn": "次回更新日: {date}",
+        "endsOn": "{date} に終了予定",
+        "pastDueNotice": "お支払いに失敗しました。「お支払い管理」からカード情報をご確認ください。",
+        "manageBilling": "お支払い管理",
+        "portalHint": "カードの変更・領収書の確認・解約はStripeの管理画面から行えます",
+        "noPlans": "この道場はまだ月謝プランを公開していません",
+        "subscribe": "このプランで申し込む",
+        "redirecting": "移動中...",
+        "viewPastInvoices": "過去の領収書を見る",
+        "intervals": { "month": "月", "week": "週", "year": "年" },
+        "errors": {
+          "loadFailed": "データの取得に失敗しました",
+          "checkoutFailed": "お支払い画面への移動に失敗しました",
+          "portalFailed": "管理画面への移動に失敗しました"
+        }
+      }
+    }
+  },
+
+  "en": {
+    "tuition": {
+      "status": {
+        "active": "Paying",
+        "past_due": "Past due",
+        "canceled": "Canceled",
+        "incomplete": "Incomplete",
+        "none": "Not enrolled"
+      },
+      "payments": {
+        "back": "Back to Settings",
+        "title": "Payout Settings",
+        "subtitle": "Set up your Stripe account to collect tuition from members",
+        "loading": "Loading...",
+        "statusTitle": "Payout Account",
+        "status": {
+          "active": "Active",
+          "pending": "In progress",
+          "none": "Not set up"
+        },
+        "checks": {
+          "charges": "Ready to accept payments",
+          "payouts": "Bank payouts"
+        },
+        "explainer": "Stripe's secure onboarding handles identity verification and bank account setup. It takes about 5–10 minutes. Tuition is paid directly into your dojo's Stripe account.",
+        "countryLabel": "Dojo country",
+        "countries": { "CA": "Canada", "JP": "Japan", "US": "United States" },
+        "startOnboarding": "Start payout setup",
+        "continueOnboarding": "Continue setup",
+        "updateAccount": "Update account details",
+        "managePlans": "Manage tuition plans",
+        "redirecting": "Redirecting to Stripe...",
+        "onboardedSuccess": "Payout setup complete! Let's create your tuition plans.",
+        "stripeNote": "Payments are processed securely by Stripe. Card details are never stored in this app.",
+        "errors": {
+          "loadFailed": "Failed to load status",
+          "onboardFailed": "Failed to start onboarding"
+        }
+      },
+      "manage": {
+        "back": "Back to Settings",
+        "title": "Tuition",
+        "connectSettings": "Payout settings",
+        "loading": "Loading...",
+        "stats": {
+          "paying": "Paying",
+          "pastDue": "Past due",
+          "notEnrolled": "Not enrolled"
+        },
+        "plansTitle": "Tuition Plans",
+        "newPlan": "+ New plan",
+        "closeForm": "Close",
+        "noPlans": "No plans yet. Create one with \"New plan\".",
+        "archive": "Archive",
+        "confirmArchive": "Archive \"{name}\"? Existing subscribers keep being billed; only new signups stop.",
+        "planCreated": "Plan created",
+        "intervals": { "month": "month", "week": "week", "year": "year" },
+        "form": {
+          "name": "Plan name",
+          "namePlaceholder": "Adult Membership",
+          "amount": "Amount",
+          "interval": "Billing interval",
+          "description": "Description (optional)",
+          "descriptionPlaceholder": "Unlimited classes per week",
+          "create": "Create plan",
+          "creating": "Creating..."
+        },
+        "membersTitle": "Member Payment Status",
+        "table": {
+          "member": "Member",
+          "plan": "Plan",
+          "status": "Status",
+          "nextPayment": "Next payment"
+        },
+        "cancelScheduled": "Cancels at period end",
+        "cancelMember": "Cancel",
+        "confirmCancelMember": "Cancel {name}'s tuition subscription at the end of the current billing period?",
+        "memberCanceled": "Cancellation scheduled for period end",
+        "noMembers": "No active members",
+        "errors": {
+          "loadFailed": "Failed to load data",
+          "invalidForm": "Enter a plan name and a valid amount",
+          "createFailed": "Failed to create plan",
+          "archiveFailed": "Failed to archive plan",
+          "cancelFailed": "Failed to cancel subscription"
+        }
+      },
+      "member": {
+        "title": "Tuition",
+        "loading": "Loading...",
+        "checkoutSuccess": "Payment complete! It may take a few seconds to reflect.",
+        "currentPlan": "Current Plan",
+        "statusActive": "Active",
+        "statusPastDue": "Past due",
+        "renewsOn": "Renews on {date}",
+        "endsOn": "Ends on {date}",
+        "pastDueNotice": "Your last payment failed. Please check your card in \"Manage billing\".",
+        "manageBilling": "Manage billing",
+        "portalHint": "Update your card, view receipts, or cancel from the Stripe portal",
+        "noPlans": "This dojo hasn't published tuition plans yet",
+        "subscribe": "Subscribe",
+        "redirecting": "Redirecting...",
+        "viewPastInvoices": "View past invoices",
+        "intervals": { "month": "month", "week": "week", "year": "year" },
+        "errors": {
+          "loadFailed": "Failed to load data",
+          "checkoutFailed": "Failed to open checkout",
+          "portalFailed": "Failed to open billing portal"
+        }
+      }
+    }
+  }
+}

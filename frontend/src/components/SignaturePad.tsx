@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 
 type Point = [number, number]; // normalized 0..1
 type Stroke = Point[];
@@ -50,7 +51,7 @@ export default function SignaturePad({
   onChange,
   height = 220,
   label,
-  clearLabel = "Clear",
+  clearLabel,
   hint,
 }: {
   disabled?: boolean;
@@ -60,6 +61,8 @@ export default function SignaturePad({
   clearLabel?: string;
   hint?: string;
 }) {
+  const t = useTranslations("waiver");
+  const effectiveClearLabel = clearLabel ?? t("clear");
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const strokesRef = useRef<Stroke[]>([]);
   const [strokeCount, setStrokeCount] = useState(0); // trigger re-renders
@@ -248,7 +251,7 @@ export default function SignaturePad({
             disabled={disabled || !hasSignature}
             className="text-slate-600 hover:underline disabled:opacity-50"
           >
-            {clearLabel}
+            {effectiveClearLabel}
           </button>
         </div>
         <div className="p-3">

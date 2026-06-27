@@ -4,6 +4,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import Navigation, { BottomNavigation } from "@/components/Navigation";
 import { PLANS, FEATURE_COMPARISON, PlanType, BillingPeriod } from "@/lib/stripe/config";
@@ -61,6 +62,7 @@ export default function BillingPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
+  const t = useTranslations("billing");
   const dojoId = typeof params?.dojoId === "string" ? params.dojoId : "";
 
   const [loading, setLoading] = useState(true);
@@ -76,11 +78,11 @@ export default function BillingPage() {
     const canceled = searchParams?.get("canceled");
     const pmUpdated = searchParams?.get("pm_updated");
 
-    if (pmUpdated === "1") return { kind: "success" as const, text: "Card updated successfully." };
-    if (success === "true") return { kind: "success" as const, text: "Checkout completed successfully." };
-    if (canceled === "true") return { kind: "info" as const, text: "Checkout was canceled." };
+    if (pmUpdated === "1") return { kind: "success" as const, text: t("cardUpdated") };
+    if (success === "true") return { kind: "success" as const, text: t("checkoutCompleted") };
+    if (canceled === "true") return { kind: "info" as const, text: t("checkoutCanceled") };
     return null;
-  }, [searchParams]);
+  }, [searchParams, t]);
 
   // Fetch subscription info
   useEffect(() => {
@@ -309,13 +311,13 @@ export default function BillingPage() {
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-          Back to Dojo
+          {t("back")}
         </button>
 
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Billing & Plans</h1>
-          <p className="text-gray-600 mt-2">Manage your subscription and view usage</p>
+          <h1 className="text-3xl font-bold text-gray-900">{t("title")}</h1>
+          <p className="text-gray-600 mt-2">{t("subtitle")}</p>
         </div>
 
         {/* ✅ Banner */}
@@ -345,26 +347,26 @@ export default function BillingPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-8">
               <div className="flex items-start justify-between flex-wrap gap-4">
                 <div>
-                  <p className="text-sm text-gray-500">Current Plan</p>
+                  <p className="text-sm text-gray-500">{t("currentPlan")}</p>
                   <div className="flex items-center gap-3 mt-1">
-                    <h2 className="text-2xl font-bold text-gray-900">{PLANS[currentPlan]?.name ?? "Free"}</h2>
+                    <h2 className="text-2xl font-bold text-gray-900">{PLANS[currentPlan]?.name ?? t("planFree")}</h2>
 
                     {currentPlan !== "free" && subscription?.status === "active" && (
                       <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
-                        Active
+                        {t("active")}
                       </span>
                     )}
 
                     {subscription?.cancelAtPeriodEnd && (
                       <span className="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full">
-                        Cancels at period end
+                        {t("cancelsAtPeriodEnd")}
                       </span>
                     )}
                   </div>
 
                   {subscription?.periodEnd && currentPlan !== "free" && (
                     <p className="text-sm text-gray-500 mt-1">
-                      {subscription.cancelAtPeriodEnd ? "Access until" : "Renews"}{" "}
+                      {subscription.cancelAtPeriodEnd ? t("accessUntil") : t("renews")}{" "}
                       {new Date(subscription.periodEnd).toLocaleDateString()}
                     </p>
                   )}
@@ -376,7 +378,7 @@ export default function BillingPage() {
                     onClick={handleUpdateCard}
                     className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
                   >
-                    Add / Update Card
+                    {t("addUpdateCard")}
                   </button>
 
                   {currentPlan !== "free" && (
@@ -385,7 +387,7 @@ export default function BillingPage() {
                       disabled={portalLoading}
                       className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition disabled:opacity-50"
                     >
-                      {portalLoading ? "Loading..." : "Manage Billing"}
+                      {portalLoading ? t("loading") : t("manageBilling")}
                     </button>
                   )}
                 </div>
@@ -401,7 +403,7 @@ export default function BillingPage() {
 
                     return (
                       <div key={resource} className="text-center">
-                        <p className="text-sm text-gray-500 capitalize">{resource}</p>
+                        <p className="text-sm text-gray-500 capitalize">{t(resource)}</p>
                         <p className={`text-xl font-semibold ${isNearLimit ? "text-orange-600" : "text-gray-900"}`}>
                           {usage.current} / {formatLimit(usage.limit)}
                         </p>
@@ -437,7 +439,7 @@ export default function BillingPage() {
                     billingPeriod === "monthly" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
                   }`}
                 >
-                  Monthly
+                  {t("monthly")}
                 </button>
                 <button
                   onClick={() => setBillingPeriod("yearly")}
@@ -445,7 +447,7 @@ export default function BillingPage() {
                     billingPeriod === "yearly" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
                   }`}
                 >
-                  Yearly <span className="ml-1 text-green-600 text-xs">Save 17%</span>
+                  {t("yearly")} <span className="ml-1 text-green-600 text-xs">{t("yearlyDiscount")}</span>
                 </button>
               </div>
             </div>
@@ -467,7 +469,7 @@ export default function BillingPage() {
                   >
                     {isPopular && (
                       <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                        <span className="bg-blue-500 text-white text-xs font-bold px-3 py-1 rounded-full">MOST POPULAR</span>
+                        <span className="bg-blue-500 text-white text-xs font-bold px-3 py-1 rounded-full">{t("mostPopular")}</span>
                       </div>
                     )}
 
@@ -477,7 +479,7 @@ export default function BillingPage() {
 
                       <div className="mt-4">
                         <span className="text-4xl font-bold text-gray-900">
-                          {price === 0 ? "Free" : `$${billingPeriod === "yearly" ? Math.round(price / 12) : price}`}
+                          {price === 0 ? t("planFree") : `$${billingPeriod === "yearly" ? Math.round(price / 12) : price}`}
                         </span>
                         {price > 0 && <span className="text-gray-500">/mo</span>}
                       </div>
@@ -519,16 +521,16 @@ export default function BillingPage() {
                               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                             />
                           </svg>
-                          Processing...
+                          {t("redirecting")}
                         </span>
                       ) : isCurrentPlan ? (
-                        "Current Plan"
+                        t("current")
                       ) : plan === "free" ? (
-                        "Free Plan"
+                        t("planFree")
                       ) : currentPlan !== "free" && plan !== "business" ? (
-                        "Downgrade"
+                        t("downgrade")
                       ) : (
-                        "Upgrade"
+                        t("upgrade")
                       )}
                     </button>
                   </div>
@@ -539,17 +541,17 @@ export default function BillingPage() {
             {/* Feature Comparison Table */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">Feature Comparison</h3>
+                <h3 className="text-lg font-semibold text-gray-900">{t("featureComparison")}</h3>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Feature</th>
-                      <th className="px-6 py-3 text-center text-sm font-medium text-gray-500">Free</th>
-                      <th className="px-6 py-3 text-center text-sm font-medium text-gray-500">Pro</th>
-                      <th className="px-6 py-3 text-center text-sm font-medium text-gray-500">Business</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">{t("feature")}</th>
+                      <th className="px-6 py-3 text-center text-sm font-medium text-gray-500">{t("planFree")}</th>
+                      <th className="px-6 py-3 text-center text-sm font-medium text-gray-500">{t("planPro")}</th>
+                      <th className="px-6 py-3 text-center text-sm font-medium text-gray-500">{t("planBusiness")}</th>
                     </tr>
                   </thead>
 
@@ -584,35 +586,33 @@ export default function BillingPage() {
 
             {/* FAQ Section */}
             <div className="mt-12">
-              <h3 className="text-xl font-bold text-gray-900 mb-6">Frequently Asked Questions</h3>
+              <h3 className="text-xl font-bold text-gray-900 mb-6">{t("frequentlyAsked")}</h3>
               <div className="space-y-4">
                 <details className="bg-white rounded-lg border border-gray-200 p-4">
-                  <summary className="font-medium text-gray-900 cursor-pointer">Can I change plans anytime?</summary>
+                  <summary className="font-medium text-gray-900 cursor-pointer">{t("faq1")}</summary>
                   <p className="mt-3 text-gray-600 text-sm">
-                    Yes! You can upgrade or downgrade your plan at any time. When upgrading, you&apos;ll be charged the prorated difference.
-                    When downgrading, the credit will be applied to future invoices.
+                    {t("faq1Answer")}
                   </p>
                 </details>
 
                 <details className="bg-white rounded-lg border border-gray-200 p-4">
-                  <summary className="font-medium text-gray-900 cursor-pointer">What happens when I exceed my plan limits?</summary>
+                  <summary className="font-medium text-gray-900 cursor-pointer">{t("faq2")}</summary>
                   <p className="mt-3 text-gray-600 text-sm">
-                    You won&apos;t be able to add more resources (members, staff, etc.) until you upgrade your plan. Your existing data is always safe and accessible.
+                    {t("faq2Answer")}
                   </p>
                 </details>
 
                 <details className="bg-white rounded-lg border border-gray-200 p-4">
-                  <summary className="font-medium text-gray-900 cursor-pointer">Is there a free trial for paid plans?</summary>
+                  <summary className="font-medium text-gray-900 cursor-pointer">{t("faq3")}</summary>
                   <p className="mt-3 text-gray-600 text-sm">
-                    The Free plan lets you try all core features with limited capacity. This way, you can evaluate the platform before committing to a paid plan.
+                    {t("faq3Answer")}
                   </p>
                 </details>
 
                 <details className="bg-white rounded-lg border border-gray-200 p-4">
-                  <summary className="font-medium text-gray-900 cursor-pointer">How do I cancel my subscription?</summary>
+                  <summary className="font-medium text-gray-900 cursor-pointer">{t("faq4")}</summary>
                   <p className="mt-3 text-gray-600 text-sm">
-                    Click &quot;Manage Billing&quot; above to access the Stripe customer portal where you can cancel your subscription.
-                    Your access continues until the end of the billing period.
+                    {t("faq4Answer")}
                   </p>
                 </details>
               </div>

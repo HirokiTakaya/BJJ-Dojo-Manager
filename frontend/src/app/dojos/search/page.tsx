@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { dbNullable } from "@/firebase";
 import { searchPublicDojosByPrefix } from "@/lib/searchDojos";
 
@@ -17,6 +18,7 @@ type DojoRow = {
 };
 
 export default function DojoSearchPage() {
+  const t = useTranslations("search");
   const [term, setTerm] = useState("");
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState<DojoRow[]>([]);
@@ -33,7 +35,7 @@ export default function DojoSearchPage() {
       }
 
       if (!dbNullable) {
-        setErr("Firestore is not ready.");
+        setErr(t("firestoreNotReady"));
         return;
       }
 
@@ -42,30 +44,30 @@ export default function DojoSearchPage() {
         const result = await searchPublicDojosByPrefix(dbNullable, s, 30);
         setRows(result as DojoRow[]);
       } catch (e: any) {
-        setErr(e?.message || "Search failed.");
+        setErr(e?.message || t("searchFailed"));
       } finally {
         setBusy(false);
       }
     }, 250);
 
     return () => clearTimeout(handle);
-  }, [term]);
+  }, [term, t]);
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: 24 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>Search Dojos</h1>
+      <h1 style={{ fontSize: 22, fontWeight: 700 }}>{t("title")}</h1>
       <p style={{ opacity: 0.75, marginTop: 6 }}>
-        Dojo名の前方一致で検索します（public dojos）。
+        {t("subtitle")}
       </p>
 
       <input
         value={term}
         onChange={(e) => setTerm(e.target.value)}
-        placeholder="例: Gracie / Roll / Alliance ..."
+        placeholder={t("placeholder")}
         style={{ width: "100%", padding: 12, borderRadius: 12, marginTop: 12 }}
       />
 
-      {busy && <div style={{ marginTop: 10, opacity: 0.7 }}>Searching...</div>}
+      {busy && <div style={{ marginTop: 10, opacity: 0.7 }}>{t("searching")}</div>}
 
       {err && (
         <div style={{ marginTop: 12, padding: 12, border: "1px solid #ffb4b4", borderRadius: 10 }}>
@@ -76,7 +78,7 @@ export default function DojoSearchPage() {
       <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
         {rows.map((d) => (
           <div key={d.id} style={{ padding: 12, border: "1px solid #ddd", borderRadius: 12 }}>
-            <div style={{ fontWeight: 700 }}>{d.name ?? "(no name)"}</div>
+            <div style={{ fontWeight: 700 }}>{d.name ?? t("noName")}</div>
             <div style={{ opacity: 0.8, fontSize: 13 }}>
               {(d.city ?? "").toString()} {(d.country ?? "").toString()}
             </div>
@@ -91,7 +93,7 @@ export default function DojoSearchPage() {
         ))}
 
         {!busy && !err && term.trim() && rows.length === 0 && (
-          <div style={{ marginTop: 10, opacity: 0.7 }}>No results.</div>
+          <div style={{ marginTop: 10, opacity: 0.7 }}>{t("noResults")}</div>
         )}
       </div>
     </div>

@@ -2,11 +2,15 @@
 
 import React, { useState, useCallback, useMemo } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { auth } from "@/firebase";
+import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 
+// NavItem now uses a translation key instead of a hardcoded label.
+// labelKey is looked up under the "navigation" namespace.
 export type NavItem = {
   id: string;
-  label: string;
+  labelKey: string;
   icon: string;
   href: string | ((dojoId: string) => string);
   staffOnly?: boolean;
@@ -14,63 +18,68 @@ export type NavItem = {
 };
 
 const DEFAULT_NAV_ITEMS: NavItem[] = [
-  {
-    id: "home",
-    label: "Home",
-    icon: "🏠",
-    href: "/home",
-  },
+  { id: "home", labelKey: "home", icon: "🏠", href: "/home" },
   {
     id: "timetable",
-    label: "Timetable",
+    labelKey: "timetable",
     icon: "📅",
     href: (dojoId) => `/dojos/${dojoId}/timetable`,
   },
   {
     id: "notices-staff",
-    label: "Announcements",
+    labelKey: "inbox",
     icon: "📣",
     href: (dojoId) => `/dojos/${dojoId}/notices`,
     staffOnly: true,
   },
   {
     id: "inbox",
-    label: "Inbox",
+    labelKey: "inbox",
     icon: "✉️",
     href: (dojoId) => `/dojos/${dojoId}/inbox`,
     studentOnly: true,
   },
+  // ✅ Tuition (member-facing monthly fee page)
+  {
+    id: "tuition",
+    labelKey: "tuition",
+    icon: "💴",
+    href: (dojoId) => `/dojos/${dojoId}/tuition`,
+    studentOnly: true,
+  },
+  // ✅ NEW: Tuition management for owner/staff (plan creation & payment status)
+  // Placed BEFORE billing/settings so the mobile center label resolves to
+  // "Tuition" on /settings/tuition (find() picks the first active item).
+  {
+    id: "tuition-staff",
+    labelKey: "tuition",
+    icon: "💴",
+    href: (dojoId) => `/dojos/${dojoId}/settings/tuition`,
+    staffOnly: true,
+  },
   {
     id: "members",
-    label: "Members",
+    labelKey: "members",
     icon: "👥",
     href: (dojoId) => `/dojos/${dojoId}/members`,
     staffOnly: true,
   },
-
-  // ✅ NEW: Billing / Settings（staffOnly）
-  // Billingを先に置くと /settings/billing でモバイル中央ラベルが Billing になりやすい
+  // Billing first so the mobile center label shows "Billing" on /settings/billing
   {
     id: "billing",
-    label: "Billing",
+    labelKey: "settings",
     icon: "💳",
     href: (dojoId) => `/dojos/${dojoId}/settings/billing`,
     staffOnly: true,
   },
   {
     id: "settings",
-    label: "Settings",
+    labelKey: "settings",
     icon: "⚙️",
     href: (dojoId) => `/dojos/${dojoId}/settings`,
     staffOnly: true,
   },
-
-  {
-    id: "profile",
-    label: "Profile",
-    icon: "👤",
-    href: "/profile",
-  },
+  { id: "profile", labelKey: "profile", icon: "👤", href: "/profile" },
 ];
 
 type NavigationProps = {
@@ -81,20 +90,19 @@ type NavigationProps = {
   customItems?: NavItem[];
 };
 
-// ✅ pathnameから dojoId を推定（propsが無い/渡せないケースの保険）
-// 例: /dojos/ABC123/timetable -> ABC123
-// 除外: /dojos/search, /dojos/attendance-dashboard, /dojos/members/xxx など
+// Derive dojoId from pathname when the prop wasn't passed.
+// e.g. /dojos/ABC123/timetable -> ABC123
+// Excludes fixed route names like /dojos/search, /dojos/attendance-dashboard.
 function deriveDojoIdFromPathname(pathname?: string | null): string | null {
   if (!pathname) return null;
 
-  const parts = pathname.split("/").filter(Boolean); // ["dojos", "ABC123", "timetable"]
+  const parts = pathname.split("/").filter(Boolean);
   if (parts.length < 2) return null;
   if (parts[0] !== "dojos") return null;
 
   const candidate = parts[1];
   if (!candidate) return null;
 
-  // DojoIDではなく「固定ルート名」になりうるものを除外
   const RESERVED = new Set(["search", "attendance-dashboard", "members"]);
   if (RESERVED.has(candidate)) return null;
 
@@ -110,16 +118,16 @@ export default function Navigation({
 }: NavigationProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const t = useTranslations("navigation");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navItems = customItems || DEFAULT_NAV_ITEMS;
 
-  // ✅ dojoId のフォールバック（既存propsを優先し、無ければ pathname から推定）
+  // Fallback dojoId: prop first, otherwise derived from pathname.
   const effectiveDojoId = useMemo(() => {
     return dojoId ?? deriveDojoIdFromPathname(pathname);
   }, [dojoId, pathname]);
 
-  // フィルターされたナビゲーションアイテム
   const filteredItems = navItems.filter((item) => {
     if (item.staffOnly && !isStaff) return false;
     if (item.studentOnly && isStaff) return false;
@@ -144,7 +152,6 @@ export default function Navigation({
       const href = getHref(item);
       if (!href || !pathname) return false;
 
-      // 完全一致または前方一致（サブページ対応）
       if (pathname === href) return true;
       if (item.id !== "home" && pathname.startsWith(href)) return true;
 
@@ -169,13 +176,23 @@ export default function Navigation({
     router.replace("/login");
   }, [router]);
 
+  // Helper: pull the translated label for an item. Falls back to the key
+  // itself if missing — keeps the UI usable while a translation is added.
+  const getLabel = (item: NavItem) => {
+    try {
+      return t(item.labelKey as any);
+    } catch {
+      return item.labelKey;
+    }
+  };
+
   return (
     <>
       {/* Desktop Navigation Bar */}
       <nav className="hidden md:block sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-6xl mx-auto px-4">
           <div className="flex items-center justify-between h-14">
-            {/* Left: Logo & Nav Items */}
+            {/* Left: Nav Items */}
             <div className="flex items-center gap-1">
               {filteredItems.map((item) => {
                 const href = getHref(item);
@@ -197,13 +214,13 @@ export default function Navigation({
                     ].join(" ")}
                   >
                     <span className="text-base">{item.icon}</span>
-                    <span>{item.label}</span>
+                    <span>{getLabel(item)}</span>
                   </button>
                 );
               })}
             </div>
 
-            {/* Right: User Info & Sign Out */}
+            {/* Right: User Info, Language, Sign Out */}
             <div className="flex items-center gap-3">
               {(userName || userEmail) && (
                 <div className="text-sm text-slate-600">
@@ -215,11 +232,12 @@ export default function Navigation({
                   )}
                 </div>
               )}
+              <LanguageSwitcher />
               <button
                 onClick={handleSignOut}
                 className="px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"
               >
-                Sign Out
+                {t("signOut")}
               </button>
             </div>
           </div>
@@ -232,6 +250,7 @@ export default function Navigation({
           {/* Hamburger Button */}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            aria-label={mobileMenuOpen ? t("closeMenu") : t("openMenu")}
             className="p-2 rounded-lg hover:bg-slate-100 transition-all"
           >
             <svg className="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -245,11 +264,18 @@ export default function Navigation({
 
           {/* Center: Current Page */}
           <div className="font-semibold text-slate-900">
-            {filteredItems.find((item) => isActive(item))?.label || "Menu"}
+            {(() => {
+              const active = filteredItems.find((item) => isActive(item));
+              return active ? getLabel(active) : t("menu");
+            })()}
           </div>
 
-          {/* Right: User Avatar or Sign Out */}
-          <button onClick={handleSignOut} className="p-2 rounded-lg hover:bg-slate-100 transition-all">
+          {/* Right: Sign Out */}
+          <button
+            onClick={handleSignOut}
+            aria-label={t("signOut")}
+            className="p-2 rounded-lg hover:bg-slate-100 transition-all"
+          >
             <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
@@ -285,16 +311,21 @@ export default function Navigation({
                     ].join(" ")}
                   >
                     <span className="text-xl">{item.icon}</span>
-                    <span className="font-medium">{item.label}</span>
+                    <span className="font-medium">{getLabel(item)}</span>
                   </button>
                 );
               })}
 
+              {/* Language switcher inside mobile menu */}
+              <div className="mt-2 px-4 py-3 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-sm text-slate-600">🌐</span>
+                <LanguageSwitcher />
+              </div>
+
               {/* User Info */}
               {(userName || userEmail) && (
-                <div className="mt-2 px-4 py-3 border-t border-slate-100">
+                <div className="px-4 py-3 border-t border-slate-100">
                   <div className="text-sm text-slate-600">
-                    Signed in as{" "}
                     <span className="font-semibold text-slate-900">{userName || userEmail}</span>
                   </div>
                   {isStaff && (
@@ -318,7 +349,7 @@ export default function Navigation({
 }
 
 // ─────────────────────────────────────────────────────────────
-// ✅ シンプルなボトムナビゲーション（モバイル用の代替案）
+// Simple bottom navigation (alternative for mobile)
 // ─────────────────────────────────────────────────────────────
 export function BottomNavigation({
   dojoId,
@@ -329,27 +360,38 @@ export function BottomNavigation({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const t = useTranslations("navigation");
 
-  // ✅ BottomNavigation 側もフォールバックを入れておく（既存挙動は維持しつつ、渡し忘れに強く）
   const effectiveDojoId = useMemo(() => {
     return dojoId ?? deriveDojoIdFromPathname(pathname);
   }, [dojoId, pathname]);
 
   const items = [
-    { id: "home", label: "Home", icon: "🏠", href: "/home" },
+    { id: "home", label: t("home"), icon: "🏠", href: "/home" },
     {
       id: "timetable",
-      label: "Schedule",
+      label: t("timetable"),
       icon: "📅",
       href: effectiveDojoId ? `/dojos/${effectiveDojoId}/timetable` : null,
     },
     {
       id: "notices",
-      label: isStaff ? "Announce" : "Inbox",
+      label: t("inbox"),
       icon: isStaff ? "📣" : "✉️",
       href: effectiveDojoId ? `/dojos/${effectiveDojoId}/${isStaff ? "notices" : "inbox"}` : null,
     },
-    { id: "profile", label: "Profile", icon: "👤", href: "/profile" },
+    // ✅ Tuition tab for everyone:
+    //   members -> payment page (/tuition)
+    //   staff   -> tuition management (/settings/tuition)
+    {
+      id: "tuition",
+      label: t("tuition"),
+      icon: "💴",
+      href: effectiveDojoId
+        ? `/dojos/${effectiveDojoId}/${isStaff ? "settings/tuition" : "tuition"}`
+        : null,
+    },
+    { id: "profile", label: t("profile"), icon: "👤", href: "/profile" },
   ];
 
   return (

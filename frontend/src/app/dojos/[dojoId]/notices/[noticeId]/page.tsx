@@ -3,6 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { doc, getDoc } from 'firebase/firestore';
 
 import { useAuth } from '@/providers/AuthProvider';
@@ -36,8 +37,7 @@ const isPermissionDenied = (err: unknown): boolean => {
   return code.includes('permission-denied') || msg.includes('Missing or insufficient permissions');
 };
 
-const TYPE_LABELS = { memo: 'Gym Update', notice: 'Announcement' } as const;
-const typeLabel = (t?: string): string => TYPE_LABELS[t as keyof typeof TYPE_LABELS] ?? 'Announcement';
+// Type labels are now resolved via useTranslations inside the component
 
 type InboxNotice = {
   dojoId?: string;
@@ -61,19 +61,19 @@ const SectionTitle = React.memo(({ children }: { children: string }) => (
 ));
 SectionTitle.displayName = 'SectionTitle';
 
-type AttachmentItemProps = { a: { url?: string; name?: string; type?: string; size?: number }; index: number };
+type AttachmentItemProps = { a: { url?: string; name?: string; type?: string; size?: number }; index: number; openLabel: string; fileLabel: string };
 
-const AttachmentItem = React.memo(({ a }: AttachmentItemProps) => (
+const AttachmentItem = React.memo(({ a, openLabel, fileLabel }: AttachmentItemProps) => (
   <li className="flex items-start justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
     <div className="min-w-0">
       <a className="font-medium text-blue-600 hover:text-blue-800 underline underline-offset-2 break-words" href={a.url} target="_blank" rel="noreferrer">
         {a.name || a.url}
       </a>
       <div className="mt-1 text-xs text-gray-500">
-        {a.type ? String(a.type) : 'file'}{a.size ? ` · ${formatBytes(a.size)}` : ''}
+        {a.type ? String(a.type) : fileLabel}{a.size ? ` · ${formatBytes(a.size)}` : ''}
       </div>
     </div>
-    <span className="shrink-0 px-3 py-1 text-xs font-medium text-gray-700 border border-gray-200 rounded-lg bg-white">Open</span>
+    <span className="shrink-0 px-3 py-1 text-xs font-medium text-gray-700 border border-gray-200 rounded-lg bg-white">{openLabel}</span>
   </li>
 ));
 AttachmentItem.displayName = 'AttachmentItem';
@@ -87,6 +87,13 @@ export default function NoticeDetailPage() {
   const router = useRouter();
   const { user } = useAuth();
   const uid = user?.uid ?? null;
+  const t = useTranslations('noticeDetail');
+  const tNotices = useTranslations('notices');
+
+  const typeLabel = useCallback((type?: string): string => {
+    if (type === 'memo') return tNotices('typeGymUpdate');
+    return tNotices('typeNotice');
+  }, [tNotices]);
 
   const dojoId = useMemo(() => getParamAsString((params as Record<string, unknown>)?.dojoId), [params]);
   const noticeId = useMemo(() => getParamAsString((params as Record<string, unknown>)?.noticeId), [params]);
@@ -109,7 +116,7 @@ export default function NoticeDetailPage() {
       setRow(undefined);
 
       if (!dojoId || !noticeId) {
-        if (mounted) { setRow(null); setErrText('Announcement not found.'); }
+        if (mounted) { setRow(null); setErrText(t('notFound')); }
         return;
       }
 
@@ -143,21 +150,21 @@ export default function NoticeDetailPage() {
             }
 
             setRow(null);
-            setErrText('This announcement is no longer available.');
+            setErrText(t('noLongerAvailable'));
           } catch {
             setRow(null);
-            setErrText('Could not load announcement.');
+            setErrText(t('couldNotLoad'));
           }
         } else {
           setRow(null);
-          setErrText('Could not load announcement.');
+          setErrText(t('couldNotLoad'));
         }
       }
     };
 
     fetchNotice();
     return () => { mounted = false; };
-  }, [dojoId, noticeId, uid]);
+  }, [dojoId, noticeId, uid, t]);
 
   const uiStatus = useMemo(() => (row ? computeUiStatus(row as any) : 'upcoming'), [row]);
   const rowData = row as Record<string, unknown> | null | undefined;
@@ -185,11 +192,11 @@ export default function NoticeDetailPage() {
         <main className="max-w-3xl mx-auto px-4 py-8 pb-24">
           <button onClick={handleBack} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 text-sm mb-6">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-            Back
+            {t('back')}
           </button>
           {errText && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">{errText}</div>}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 text-center text-gray-500">
-            Announcement not found.
+            {t('notFound')}
           </div>
         </main>
         <BottomNavigation />
@@ -211,11 +218,11 @@ export default function NoticeDetailPage() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
           <button onClick={handleBack} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 text-sm mb-4">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-            Back
+            {t('back')}
           </button>
 
           {dojoName && <p className="text-sm font-medium text-blue-600 mb-1">{dojoName}</p>}
-          <h1 className="text-2xl font-bold text-gray-900">{(rowData?.title as string) || 'Announcement'}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{(rowData?.title as string) || t('untitled')}</h1>
 
           <div className="flex flex-wrap items-center gap-2 mt-3">
             <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm font-medium">
@@ -231,20 +238,20 @@ export default function NoticeDetailPage() {
         {/* Metadata */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-            <SectionTitle>Category</SectionTitle>
+            <SectionTitle>{t('category')}</SectionTitle>
             <p className="mt-2 font-semibold text-gray-900">{typeLabel(rowData?.type as string)}</p>
           </div>
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-            <SectionTitle>Audience</SectionTitle>
+            <SectionTitle>{t('audience')}</SectionTitle>
             <p className="mt-2 font-semibold text-gray-900">
-              {rowData?.audienceType === 'all' ? 'All Members' : rowData?.audienceType === 'uids' ? 'Selected Members' : String(rowData?.audienceType || '—')}
+              {rowData?.audienceType === 'all' ? t('audienceAll') : rowData?.audienceType === 'uids' ? t('audienceCustom') : String(rowData?.audienceType || '—')}
             </p>
             {rowData?.audienceType === 'uids' && Array.isArray(rowData?.audienceUids) && (
-              <p className="text-sm text-gray-500 mt-1">Recipients: {(rowData.audienceUids as string[]).length}</p>
+              <p className="text-sm text-gray-500 mt-1">{t('recipients', { count: (rowData.audienceUids as string[]).length })}</p>
             )}
           </div>
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-            <SectionTitle>Period</SectionTitle>
+            <SectionTitle>{t('period')}</SectionTitle>
             <p className="mt-2 text-sm text-gray-700">
               {startTime.toLocaleString()} – {endTime.toLocaleString()}
             </p>
@@ -253,23 +260,23 @@ export default function NoticeDetailPage() {
 
         {/* Body */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-          <SectionTitle>Message</SectionTitle>
+          <SectionTitle>{t('message')}</SectionTitle>
           {rowData?.body ? (
             <div className="mt-3 whitespace-pre-wrap text-gray-900 leading-relaxed">{String(rowData.body)}</div>
           ) : (
-            <p className="mt-3 text-sm text-gray-400">No message body.</p>
+            <p className="mt-3 text-sm text-gray-400">{t('noMessageBody')}</p>
           )}
         </div>
 
         {/* Attachments */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-          <SectionTitle>Attachments</SectionTitle>
+          <SectionTitle>{t('attachments')}</SectionTitle>
           {attachments && attachments.length > 0 ? (
             <ul className="mt-3 space-y-2">
-              {attachments.map((a, i) => <AttachmentItem key={i} a={a} index={i} />)}
+              {attachments.map((a, i) => <AttachmentItem key={i} a={a} index={i} openLabel={t('open')} fileLabel={t('file')} />)}
             </ul>
           ) : (
-            <p className="mt-3 text-sm text-gray-400">No attachments.</p>
+            <p className="mt-3 text-sm text-gray-400">{t('noAttachments')}</p>
           )}
         </div>
       </main>

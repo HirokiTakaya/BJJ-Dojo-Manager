@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { db } from "@/firebase";
 import {
   collection,
@@ -74,6 +75,7 @@ export default function SessionReservationsView({
   sessionDateKey,
   isStaff,
 }: SessionReservationsViewProps) {
+  const t = useTranslations("sessionReservations");
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [members, setMembers] = useState<MemberInfo[]>([]);
@@ -114,7 +116,7 @@ export default function SessionReservationsView({
             reservList.push({
               id: d.id,
               memberId: data.memberId || d.id,
-              memberName: data.memberName || "Unknown",
+              memberName: data.memberName || t("unknownMember"),
               status: data.status || "confirmed",
               createdAt: data.createdAt,
             });
@@ -158,7 +160,7 @@ export default function SessionReservationsView({
           setMembers(memberList);
         }
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || "Failed to load data");
+        if (!cancelled) setError(e?.message || t("errors.loadFailed"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -251,7 +253,7 @@ export default function SessionReservationsView({
       setSuccess(`${displayName}: ${status}`);
       setTimeout(() => setSuccess(""), 2000);
     } catch (e: any) {
-      setError(e?.message || "Failed.");
+      setError(e?.message || t("errors.generic"));
     } finally {
       setBusy(false);
     }
@@ -286,10 +288,10 @@ export default function SessionReservationsView({
           displayName: r.memberName,
         }))
       );
-      setSuccess("All marked present!");
+      setSuccess(t("allMarkedPresent"));
       setTimeout(() => setSuccess(""), 2000);
     } catch (e: any) {
-      setError(e?.message || "Failed.");
+      setError(e?.message || t("errors.generic"));
     } finally {
       setBusy(false);
     }
@@ -341,7 +343,7 @@ export default function SessionReservationsView({
       setSuccess(`Added: ${member.displayName}`);
       setTimeout(() => setSuccess(""), 2000);
     } catch (e: any) {
-      setError(e?.message || "Failed to add reservation.");
+      setError(e?.message || t("errors.addFailed"));
     } finally {
       setBusy(false);
     }
@@ -366,7 +368,7 @@ export default function SessionReservationsView({
       setSuccess(`Removed: ${reservation.memberName}`);
       setTimeout(() => setSuccess(""), 2000);
     } catch (e: any) {
-      setError(e?.message || "Failed to cancel reservation.");
+      setError(e?.message || t("errors.cancelFailed"));
     } finally {
       setBusy(false);
     }
@@ -391,9 +393,9 @@ export default function SessionReservationsView({
       {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <h2 className="text-lg font-bold text-gray-900">
-          📋 Reservations &amp; Attendance
+          {t("headerTitle")}
           <span className="text-sm font-normal text-gray-500 ml-2">
-            ({presentCount}/{reservations.length} present)
+            {t("presentCount", { present: presentCount, total: reservations.length })}
           </span>
         </h2>
         <div className="flex flex-wrap items-center gap-2">
@@ -402,7 +404,7 @@ export default function SessionReservationsView({
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search..."
+              placeholder={t("searchPlaceholder")}
               className="w-48 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           )}
@@ -412,7 +414,7 @@ export default function SessionReservationsView({
               disabled={busy}
               className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition disabled:opacity-50"
             >
-              ✓ All Present
+              {t("markAllPresent")}
             </button>
           )}
           {isStaff && (
@@ -421,7 +423,7 @@ export default function SessionReservationsView({
               disabled={busy}
               className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
             >
-              + Add Member
+              {t("addMember")}
             </button>
           )}
         </div>
@@ -442,16 +444,16 @@ export default function SessionReservationsView({
       {/* Reservation + Attendance List */}
       {reservations.length === 0 ? (
         <div className="text-sm text-gray-400 text-center py-8">
-          No reservations yet.
+          {t("noReservations")}
           {isStaff && (
             <span className="block mt-1">
-              Click <span className="font-semibold text-blue-600">&quot;+ Add Member&quot;</span> to add members.
+              {t("clickAddHint")}
             </span>
           )}
         </div>
       ) : filteredReservations.length === 0 ? (
         <p className="text-sm text-gray-400 text-center py-4">
-          No reservations match &quot;{search}&quot;.
+          {t("noMatchSearch", { query: search })}
         </p>
       ) : (
         <div className="space-y-2">
@@ -487,7 +489,7 @@ export default function SessionReservationsView({
                       </span>
                       {isKids && (
                         <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">
-                          Kids
+                          {t("kids")}
                         </span>
                       )}
                       {/* Attendance badge */}
@@ -502,10 +504,10 @@ export default function SessionReservationsView({
                           }`}
                         >
                           {attStatus === "present"
-                            ? "✓ Present"
+                            ? t("statusPresent")
                             : attStatus === "late"
-                            ? "⏰ Late"
-                            : "✗ Absent"}
+                            ? t("statusLate")
+                            : t("statusAbsent")}
                         </span>
                       )}
                     </div>
@@ -549,6 +551,7 @@ export default function SessionReservationsView({
                             : "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100",
                         };
                         const icons = { present: "✓", late: "⏰", absent: "✗" };
+                        const labels = { present: t("labelPresent"), late: t("labelLate"), absent: t("labelAbsent") };
                         return (
                           <button
                             key={s}
@@ -558,7 +561,7 @@ export default function SessionReservationsView({
                           >
                             {icons[s]}
                             <span className="hidden sm:inline ml-1">
-                              {s.charAt(0).toUpperCase() + s.slice(1)}
+                              {labels[s]}
                             </span>
                           </button>
                         );
@@ -567,7 +570,7 @@ export default function SessionReservationsView({
                         onClick={() => cancelReservation(r)}
                         disabled={busy}
                         className="ml-1 px-2 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition disabled:opacity-50"
-                        title="Remove reservation"
+                        title={t("removeReservation")}
                       >
                         ✕
                       </button>
@@ -583,7 +586,7 @@ export default function SessionReservationsView({
       {/* Summary bar */}
       <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-blue-50 border border-blue-100">
         <span className="text-sm text-blue-700">
-          Total: <span className="font-bold">{reservations.length}</span> reserved
+          {t("summaryTotal", { count: reservations.length })}
         </span>
         <div className="flex items-center gap-3 text-sm">
           <span className="text-green-700 font-semibold">
@@ -607,11 +610,7 @@ export default function SessionReservationsView({
           </span>
           <span className="text-gray-400">
             —{" "}
-            {
-              reservations.filter((r) => !attendanceMap.has(r.memberId))
-                .length
-            }{" "}
-            unmarked
+            {t("summaryUnmarked", { count: reservations.filter((r) => !attendanceMap.has(r.memberId)).length })}
           </span>
         </div>
       </div>
@@ -629,7 +628,7 @@ export default function SessionReservationsView({
             <div className="p-6 pb-3">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold text-gray-900">
-                  Add Member to Session
+                  {t("modalTitle")}
                 </h3>
                 <button
                   onClick={() => setAddMemberOpen(false)}
@@ -654,7 +653,7 @@ export default function SessionReservationsView({
                 type="search"
                 value={addSearch}
                 onChange={(e) => setAddSearch(e.target.value)}
-                placeholder="Search members by name or email..."
+                placeholder={t("modalSearch")}
                 autoFocus
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
@@ -664,8 +663,8 @@ export default function SessionReservationsView({
               {availableMembers.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-6">
                   {members.length === reservations.length
-                    ? "All members are already added."
-                    : "No members match your search."}
+                    ? t("allMembersAdded")
+                    : t("noMembersMatch")}
                 </p>
               ) : (
                 <div className="space-y-1.5">
@@ -696,7 +695,7 @@ export default function SessionReservationsView({
                               </span>
                               {m.isKids && (
                                 <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">
-                                  Kids
+                                  {t("kids")}
                                 </span>
                               )}
                             </div>
@@ -717,7 +716,7 @@ export default function SessionReservationsView({
                           </div>
                         </div>
                         <span className="text-blue-600 text-sm font-semibold flex-shrink-0">
-                          + Add
+                          {t("addBtn")}
                         </span>
                       </button>
                     );

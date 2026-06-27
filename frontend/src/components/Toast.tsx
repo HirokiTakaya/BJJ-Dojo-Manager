@@ -6,6 +6,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 export type ToastType = "success" | "error" | "info" | "warning";
 
@@ -52,6 +53,7 @@ export default function Toast({
 }: ToastProps) {
   const [visible, setVisible] = useState(true);
   const [exiting, setExiting] = useState(false);
+  const tCommon = useTranslations("common");
 
   useEffect(() => {
     if (duration > 0) {
@@ -145,7 +147,7 @@ export default function Toast({
               fontSize: 16,
               flexShrink: 0,
             }}
-            aria-label="Close"
+            aria-label={tCommon("close")}
           >
             ×
           </button>

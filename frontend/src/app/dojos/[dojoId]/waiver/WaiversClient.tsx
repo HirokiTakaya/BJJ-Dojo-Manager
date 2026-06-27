@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import Navigation, { BottomNavigation } from "@/components/Navigation";
 import { useDojoName } from "@/hooks/useDojoName";
@@ -170,6 +171,7 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
   const router = useRouter();
   const params = useParams();
   const { user, loading: authLoading } = useAuth();
+  const t = useTranslations("waiver");
 
   const dojoId = useMemo(() => {
     const p = params as any;
@@ -400,18 +402,18 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-          Back to Dojo
+          {t("back")}
         </button>
 
         {/* Header */}
         <div className="mb-8">
           {dojoName && <p className="text-sm font-medium text-blue-600 mb-1">{dojoName}</p>}
-          <h1 className="text-3xl font-bold text-gray-900">Waivers</h1>
+          <h1 className="text-3xl font-bold text-gray-900">{t("manageTitle")}</h1>
           <p className="text-gray-600 mt-2">
-            {counts.total} total · {counts.memberCount} members · {counts.visitorCount} visitors
+            {t("summary", { total: counts.total, members: counts.memberCount, visitors: counts.visitorCount })}
             {counts.newCount > 0 && (
               <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold">
-                {counts.newCount} pending review
+                {t("pendingReviewBadge", { count: counts.newCount })}
               </span>
             )}
           </p>
@@ -438,7 +440,7 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                 filter === "new" ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-700"
               }`}
             >
-              Pending ({counts.newCount})
+              {t("filterPending", { count: counts.newCount })}
             </button>
             <button
               onClick={() => setFilter("reviewed")}
@@ -446,7 +448,7 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                 filter === "reviewed" ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-700"
               }`}
             >
-              Reviewed ({counts.reviewedCount})
+              {t("filterReviewed", { count: counts.reviewedCount })}
             </button>
             <button
               onClick={() => setFilter("all")}
@@ -454,7 +456,7 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                 filter === "all" ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-700"
               }`}
             >
-              All ({counts.total})
+              {t("filterAll", { count: counts.total })}
             </button>
           </div>
 
@@ -465,7 +467,7 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                 signerFilter === "all" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-700"
               }`}
             >
-              All
+              {t("filterAllSimple")}
             </button>
             <button
               onClick={() => setSignerFilter("member")}
@@ -473,7 +475,7 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                 signerFilter === "member" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-700"
               }`}
             >
-              Members
+              {t("filterMembers")}
             </button>
             <button
               onClick={() => setSignerFilter("visitor")}
@@ -481,7 +483,7 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                 signerFilter === "visitor" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-700"
               }`}
             >
-              Visitors
+              {t("filterVisitors")}
             </button>
           </div>
         </div>
@@ -489,7 +491,7 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
         {/* List */}
         {filtered.length === 0 ? (
           <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center text-gray-500">
-            No waivers to show.
+            {t("noWaiversToShow")}
           </div>
         ) : (
           <div className="space-y-3">
@@ -506,11 +508,11 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                         w.signerType === "member" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
                       }`}>
-                        {w.signerType === "member" ? "Member" : "Visitor"}
+                        {w.signerType === "member" ? t("labelMember") : t("labelVisitor")}
                       </span>
                       {w.isMinor && (
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                          Minor
+                          {t("labelMinor")}
                         </span>
                       )}
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -519,9 +521,9 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                         w.status === "signed" ? "bg-green-100 text-green-700" :
                         "bg-gray-100 text-gray-600"
                       }`}>
-                        {w.status === "new" ? "Pending Review" :
-                         w.status === "reviewed" ? "Reviewed" :
-                         w.status === "signed" ? "Signed" : w.status}
+                        {w.status === "new" ? t("statusPendingReview") :
+                         w.status === "reviewed" ? t("statusReviewed") :
+                         w.status === "signed" ? t("statusSigned") : w.status}
                       </span>
                     </div>
                     <p className="text-sm text-gray-500">
@@ -574,40 +576,40 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
               {/* Info grid */}
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div>
-                  <p className="text-xs uppercase tracking-wider text-gray-500">Type</p>
+                  <p className="text-xs uppercase tracking-wider text-gray-500">{t("type")}</p>
                   <p className="text-sm font-medium text-gray-900 capitalize">{selectedWaiver.signerType}</p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-wider text-gray-500">Status</p>
+                  <p className="text-xs uppercase tracking-wider text-gray-500">{t("status")}</p>
                   <p className="text-sm font-medium text-gray-900 capitalize">{selectedWaiver.status}</p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-wider text-gray-500">Email</p>
+                  <p className="text-xs uppercase tracking-wider text-gray-500">{t("email")}</p>
                   <p className="text-sm text-gray-900">{selectedWaiver.email || "—"}</p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-wider text-gray-500">Phone</p>
+                  <p className="text-xs uppercase tracking-wider text-gray-500">{t("phone")}</p>
                   <p className="text-sm text-gray-900">{selectedWaiver.phone || "—"}</p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-wider text-gray-500">Signed At</p>
+                  <p className="text-xs uppercase tracking-wider text-gray-500">{t("signedAt")}</p>
                   <p className="text-sm text-gray-900">{formatDateTime(selectedWaiver.signedAt || selectedWaiver.createdAt)}</p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-wider text-gray-500">Confirmation</p>
+                  <p className="text-xs uppercase tracking-wider text-gray-500">{t("confirmation")}</p>
                   <p className="text-sm font-mono text-gray-900">{selectedWaiver.confirmationCode || "—"}</p>
                 </div>
                 {selectedWaiver.isMinor && (
                   <>
                     <div className="col-span-2">
-                      <p className="text-xs uppercase tracking-wider text-gray-500">Guardian</p>
+                      <p className="text-xs uppercase tracking-wider text-gray-500">{t("guardian")}</p>
                       <p className="text-sm text-gray-900">{selectedWaiver.guardianName || "—"}</p>
                     </div>
                   </>
                 )}
                 {(selectedWaiver.emergencyContactName || selectedWaiver.emergencyContactPhone) && (
                   <div className="col-span-2">
-                    <p className="text-xs uppercase tracking-wider text-gray-500">Emergency Contact</p>
+                    <p className="text-xs uppercase tracking-wider text-gray-500">{t("emergencyContact")}</p>
                     <p className="text-sm text-gray-900">
                       {selectedWaiver.emergencyContactName || "—"}
                       {selectedWaiver.emergencyContactPhone && ` · ${selectedWaiver.emergencyContactPhone}`}
@@ -619,14 +621,14 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
               {/* Signature */}
               {selectedWaiver.signature?.strokesJson && selectedWaiver.signature.strokesJson !== "[]" ? (
                 <div className="mb-6">
-                  <p className="text-xs uppercase tracking-wider text-gray-500 mb-2">Signature</p>
+                  <p className="text-xs uppercase tracking-wider text-gray-500 mb-2">{t("signature")}</p>
                   <SignaturePreview strokesJson={selectedWaiver.signature.strokesJson} maxHeight="max-h-48" />
                 </div>
               ) : (
                 <div className="mb-6">
-                  <p className="text-xs uppercase tracking-wider text-gray-500 mb-2">Signature</p>
+                  <p className="text-xs uppercase tracking-wider text-gray-500 mb-2">{t("signature")}</p>
                   <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-center text-xs text-gray-500">
-                    No signature data (legacy submission)
+                    {t("noSignatureData")}
                   </div>
                 </div>
               )}
@@ -640,7 +642,7 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                     }}
                     className="flex-1 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition"
                   >
-                    View Member
+                    {t("viewMember")}
                   </button>
                 )}
                 {selectedWaiver.status === "new" && selectedWaiver.source === "waiverSubmissions" && (
@@ -649,7 +651,7 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                     disabled={busy}
                     className="flex-1 py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition disabled:opacity-50"
                   >
-                    {busy ? "Saving..." : "Mark as Reviewed"}
+                    {busy ? t("saving") : t("markAsReviewed")}
                   </button>
                 )}
                 {selectedWaiver.status !== "new" && (
@@ -657,7 +659,7 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                     onClick={() => setSelectedWaiver(null)}
                     className="flex-1 py-2.5 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition"
                   >
-                    Close
+                    {t("close")}
                   </button>
                 )}
               </div>

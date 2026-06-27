@@ -2,7 +2,9 @@
 
 import React, { useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 import styles from "./landing.module.css";
+import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 
 const SWIPE_THRESHOLD = 60;
 const NEXT_PATH = "/login";
@@ -10,6 +12,7 @@ const NEXT_PATH = "/login";
 export default function LandingPage() {
   const router = useRouter();
   const pathname = usePathname();
+  const t = useTranslations("landing");
 
   const startX = useRef<number | null>(null);
   const handledByTouch = useRef(false);
@@ -26,7 +29,7 @@ export default function LandingPage() {
     <main
       className={styles.root}
       role="button"
-      aria-label="Continue to login"
+      aria-label={t("ariaContinue")}
       tabIndex={0}
       onClick={() => {
         if (handledByTouch.current) {
@@ -69,6 +72,15 @@ export default function LandingPage() {
         <span className={styles.vignette} />
       </div>
 
+      {/* Language switcher — pinned top-right, doesn't trigger swipe handler */}
+      <div
+        style={{ position: "absolute", top: 16, right: 16, zIndex: 10 }}
+        onClick={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+      >
+        <LanguageSwitcher />
+      </div>
+
       <div className={styles.shell}>
         <header className={styles.top}>
           <div className={styles.brand}>
@@ -78,35 +90,32 @@ export default function LandingPage() {
             </div>
             <div className={styles.brandText}>
               <div className={styles.product}>BJJ Dojo Manager</div>
-              {/* ✅ English-only tag line */}
-              <div className={styles.tag}>Run your dojo faster. Track everything with confidence.</div>
+              <div className={styles.tag}>{t("tag")}</div>
             </div>
           </div>
 
           <div className={styles.pills} aria-hidden="true">
-            <span className={styles.pill}>Tap</span>
-            <span className={styles.pill}>Swipe ←</span>
-            <span className={styles.pill}>Enter</span>
+            <span className={styles.pill}>{t("pillTap")}</span>
+            <span className={styles.pill}>{t("pillSwipe")}</span>
+            <span className={styles.pill}>{t("pillEnter")}</span>
           </div>
         </header>
 
         <section className={styles.hero}>
-          <p className={styles.kicker}>ATTENDANCE • SCHEDULING • MEMBERSHIPS</p>
+          <p className={styles.kicker}>{t("kicker")}</p>
 
           <h1 className={styles.title}>
-            <span className={styles.titleLine}>Train</span>
-            <span className={styles.titleLine}>Smarter.</span>
-            <span className={styles.titleLineMuted}>Run your dojo with clarity.</span>
+            <span className={styles.titleLine}>{t("titleLine1")}</span>
+            <span className={styles.titleLine}>{t("titleLine2")}</span>
+            <span className={styles.titleLineMuted}>{t("titleLineMuted")}</span>
           </h1>
 
-          <p className={styles.sub}>
-            Attendance, memberships, schedules, announcements, and staff workflows — built for Brazilian Jiu-Jitsu gyms.
-          </p>
+          <p className={styles.sub}>{t("sub")}</p>
 
           <div className={styles.ctaWrap} aria-hidden="true">
             <div className={styles.ctaHint}>
               <span className={styles.ctaDot} />
-              <span className={styles.ctaText}>Tap anywhere to continue</span>
+              <span className={styles.ctaText}>{t("ctaHint")}</span>
             </div>
 
             <div className={styles.swipe}>
@@ -115,7 +124,7 @@ export default function LandingPage() {
               </div>
               <div className={styles.swipeRow}>
                 <span className={styles.arrow} />
-                <span className={styles.swipeText}>Swipe left</span>
+                <span className={styles.swipeText}>{t("swipeLeft")}</span>
               </div>
             </div>
           </div>
@@ -123,16 +132,14 @@ export default function LandingPage() {
 
         <footer className={styles.bottom}>
           <div className={styles.micro} aria-hidden="true">
-            <span className={styles.microItem}>Secure auth</span>
+            <span className={styles.microItem}>{t("microSecure")}</span>
             <span className={styles.microSep}>•</span>
-            <span className={styles.microItem}>Role-based access</span>
+            <span className={styles.microItem}>{t("microRoles")}</span>
             <span className={styles.microSep}>•</span>
-            <span className={styles.microItem}>Realtime updates</span>
+            <span className={styles.microItem}>{t("microRealtime")}</span>
           </div>
 
-          <p className={styles.a11y}>
-            Tip: press Enter / Space to continue. Swipe left on mobile.
-          </p>
+          <p className={styles.a11y}>{t("a11y")}</p>
         </footer>
       </div>
     </main>

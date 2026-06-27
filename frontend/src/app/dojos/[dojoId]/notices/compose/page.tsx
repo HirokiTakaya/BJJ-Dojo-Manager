@@ -3,6 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { collection, getDocs } from 'firebase/firestore';
 import { useAuth } from '@/providers/AuthProvider';
 import { dbNullable } from '@/firebase';
@@ -108,11 +109,11 @@ const ActionButton = React.memo(({
 });
 ActionButton.displayName = 'ActionButton';
 
-const ErrorList = React.memo(({ problems }: { problems: string[] }) => {
+const ErrorList = React.memo(({ problems, fixThesText }: { problems: string[]; fixThesText: string }) => {
   if (problems.length === 0) return null;
   return (
     <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-      <div className="font-semibold text-amber-900">Fix these:</div>
+      <div className="font-semibold text-amber-900">{fixThesText}</div>
       <ul className="list-disc ml-5 mt-2 text-amber-900">
         {problems.map((p) => (
           <li key={p}>{p}</li>
@@ -196,6 +197,17 @@ export default function ComposeNoticePage() {
   const router = useRouter();
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const t = useTranslations('noticeCompose');
+
+  // Translated labels (replace the static TYPE_LABELS / AUDIENCE_LABELS)
+  const TYPE_LABELS_T: Record<NoticeType, string> = {
+    notice: t('categoryNotice'),
+    memo: t('categoryMemo'),
+  };
+  const AUDIENCE_LABELS_T: Record<AudienceType, string> = {
+    all: t('audienceAll'),
+    uids: t('audienceCustom'),
+  };
 
   // Form state
   const [step, setStep] = useState<'form' | 'preview'>('form');
@@ -402,23 +414,23 @@ export default function ComposeNoticePage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">
-                  Create Announcement
+                  {t('title')}
                 </h1>
                 <p className="mt-1 text-sm text-slate-500">
-                  Post an announcement or gym update to your members
+                  {t('subtitle')}
                 </p>
               </div>
               <ActionButton variant="secondary" onClick={handleBack} disabled={busy}>
-                Back
+                {t('back')}
               </ActionButton>
             </div>
 
             <div className="mt-4 flex gap-2">
               <StepButton active={step === 'form'} onClick={() => setStep('form')} disabled={busy}>
-                Edit
+                {t('tabEdit')}
               </StepButton>
               <StepButton active={step === 'preview'} onClick={() => setStep('preview')} disabled={busy}>
-                Review
+                {t('tabReview')}
               </StepButton>
             </div>
           </div>
@@ -430,7 +442,7 @@ export default function ComposeNoticePage() {
             {err}
           </div>
         )}
-        <ErrorList problems={problems} />
+        <ErrorList problems={problems} fixThesText={t('fixThese')} />
 
         {/* Form */}
         {step === 'form' && (
@@ -439,28 +451,28 @@ export default function ComposeNoticePage() {
               {/* Type & Audience */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <label className="space-y-1">
-                  <FormLabel>Category</FormLabel>
+                  <FormLabel>{t('category')}</FormLabel>
                   <select
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
                     value={type}
                     onChange={(e) => setType(e.target.value as NoticeType)}
                     disabled={busy}
                   >
-                    <option value="notice">Announcement</option>
-                    <option value="memo">Gym Update</option>
+                    <option value="notice">{t('categoryNotice')}</option>
+                    <option value="memo">{t('categoryMemo')}</option>
                   </select>
                 </label>
 
                 <label className="space-y-1">
-                  <FormLabel>Audience</FormLabel>
+                  <FormLabel>{t('audience')}</FormLabel>
                   <select
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
                     value={audienceType}
                     onChange={(e) => setAudienceType(e.target.value as AudienceType)}
                     disabled={busy}
                   >
-                    <option value="all">All Members</option>
-                    <option value="uids">Selected Members</option>
+                    <option value="all">{t('audienceAll')}</option>
+                    <option value="uids">{t('audienceCustom')}</option>
                   </select>
                 </label>
               </div>
@@ -468,7 +480,7 @@ export default function ComposeNoticePage() {
               {/* Member Selection */}
               {audienceType === 'uids' && (
                 <div className="space-y-3">
-                  <FormLabel>Select Members</FormLabel>
+                  <FormLabel>{t('selectMembers')}</FormLabel>
                   
                   {/* Selected members chips */}
                   {selectedMembers.length > 0 && (
@@ -487,7 +499,7 @@ export default function ComposeNoticePage() {
                   <input
                     type="text"
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                    placeholder="Search members by name or email..."
+                    placeholder={t('searchMembersPlaceholder')}
                     value={memberSearchQuery}
                     onChange={(e) => setMemberSearchQuery(e.target.value)}
                     disabled={busy}
@@ -501,7 +513,7 @@ export default function ComposeNoticePage() {
                       className="text-sm text-slate-600 hover:text-slate-900 underline"
                       disabled={busy}
                     >
-                      Select all ({filteredMembers.length})
+                      {t('selectAll', { count: filteredMembers.length })}
                     </button>
                     <span className="text-slate-300">|</span>
                     <button
@@ -510,17 +522,17 @@ export default function ComposeNoticePage() {
                       className="text-sm text-slate-600 hover:text-slate-900 underline"
                       disabled={busy}
                     >
-                      Clear all
+                      {t('clearAll')}
                     </button>
                   </div>
 
                   {/* Member list */}
                   <div className="max-h-64 overflow-y-auto space-y-2 rounded-2xl border border-slate-200 p-3">
                     {membersLoading ? (
-                      <div className="text-center py-4 text-slate-500">Loading members...</div>
+                      <div className="text-center py-4 text-slate-500">{t('loadingMembers')}</div>
                     ) : filteredMembers.length === 0 ? (
                       <div className="text-center py-4 text-slate-500">
-                        {memberSearchQuery ? 'No members found' : 'No members in this gym'}
+                        {memberSearchQuery ? t('noMembersFound') : t('noMembersInGym')}
                       </div>
                     ) : (
                       filteredMembers.map((member) => (
@@ -535,31 +547,31 @@ export default function ComposeNoticePage() {
                   </div>
 
                   <div className="text-sm text-slate-500">
-                    {selectedMembers.length} member(s) selected
+                    {t('membersSelected', { count: selectedMembers.length })}
                   </div>
                 </div>
               )}
 
               {/* Title */}
               <label className="space-y-1 block">
-                <FormLabel>Title</FormLabel>
+                <FormLabel>{t('titleLabel')}</FormLabel>
                 <input
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Short, clear headline"
+                  placeholder={t('titlePlaceholder')}
                   disabled={busy}
                 />
               </label>
 
               {/* Body */}
               <label className="space-y-1 block">
-                <FormLabel>Message</FormLabel>
+                <FormLabel>{t('messageLabel')}</FormLabel>
                 <textarea
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 min-h-[160px] focus:outline-none focus:ring-2 focus:ring-slate-300"
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
-                  placeholder="Write the details here…"
+                  placeholder={t('messagePlaceholder')}
                   disabled={busy}
                 />
               </label>
@@ -567,7 +579,7 @@ export default function ComposeNoticePage() {
               {/* Times */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <label className="space-y-1">
-                  <FormLabel>Visible from</FormLabel>
+                  <FormLabel>{t('visibleFrom')}</FormLabel>
                   <input
                     type="datetime-local"
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
@@ -578,7 +590,7 @@ export default function ComposeNoticePage() {
                 </label>
 
                 <label className="space-y-1">
-                  <FormLabel>Visible until (optional)</FormLabel>
+                  <FormLabel>{t('visibleUntil')}</FormLabel>
                   <input
                     type="datetime-local"
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
@@ -589,7 +601,7 @@ export default function ComposeNoticePage() {
                 </label>
 
                 <label className="space-y-1">
-                  <FormLabel>Send time (optional)</FormLabel>
+                  <FormLabel>{t('sendTime')}</FormLabel>
                   <input
                     type="datetime-local"
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
@@ -602,7 +614,7 @@ export default function ComposeNoticePage() {
 
               {/* Attachments */}
               <div className="space-y-2">
-                <FormLabel>Attachments (optional)</FormLabel>
+                <FormLabel>{t('attachments')}</FormLabel>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -616,10 +628,10 @@ export default function ComposeNoticePage() {
                     onClick={() => fileInputRef.current?.click()}
                     disabled={busy}
                   >
-                    Add files
+                    {t('addFiles')}
                   </ActionButton>
                   <div className="text-sm text-slate-600">
-                    {files.length > 0 ? `${files.length} file(s) selected` : 'No files selected'}
+                    {files.length > 0 ? t('filesSelected', { count: files.length }) : t('noFilesSelected')}
                   </div>
                 </div>
               </div>
@@ -627,7 +639,7 @@ export default function ComposeNoticePage() {
               {/* Actions */}
               <div className="flex flex-wrap gap-2 pt-2">
                 <ActionButton variant="secondary" onClick={() => setStep('preview')} disabled={busy}>
-                  Review
+                  {t('review')}
                 </ActionButton>
                 <div className="flex-1" />
                 <ActionButton
@@ -635,14 +647,14 @@ export default function ComposeNoticePage() {
                   onClick={() => handleCreate('draft')}
                   disabled={busy || problems.length > 0}
                 >
-                  Save draft
+                  {t('saveDraft')}
                 </ActionButton>
                 <ActionButton
                   variant="primary"
                   onClick={() => handleCreate('send')}
                   disabled={busy || problems.length > 0}
                 >
-                  Publish
+                  {t('publish')}
                 </ActionButton>
               </div>
             </div>
@@ -656,39 +668,39 @@ export default function ComposeNoticePage() {
               <div className="rounded-3xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 px-5 py-5">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="inline-flex items-center rounded-full bg-slate-900 text-white px-3 py-1 text-xs font-semibold">
-                    {TYPE_LABELS[type]}
+                    {TYPE_LABELS_T[type]}
                   </span>
                   <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs font-semibold">
-                    {AUDIENCE_LABELS[audienceType]}
+                    {AUDIENCE_LABELS_T[audienceType]}
                   </span>
                   <div className="ml-auto text-xs text-slate-500">
-                    Gym: <span className="font-medium text-slate-700">{dojoId}</span>
+                    {t('gym')}: <span className="font-medium text-slate-700">{dojoId}</span>
                   </div>
                 </div>
 
                 <div className="mt-3 text-xl font-semibold text-slate-900">
-                  {title || '(Untitled)'}
+                  {title || t('untitled')}
                 </div>
 
                 <div className="mt-2 text-sm text-slate-600">
-                  Visible window: {parsedStart.toLocaleString()} – {parsedEnd.toLocaleString()}
+                  {t('visibleWindow', { from: parsedStart.toLocaleString(), to: parsedEnd.toLocaleString() })}
                 </div>
 
                 <div className="mt-1 text-xs text-slate-500">
-                  SendAt (preview): {parsedSendAtForPreview.toLocaleString()}
-                  {sendAtLocal ? '' : ' (default = Visible from)'}
+                  {t('sendAtPreview', { time: parsedSendAtForPreview.toLocaleString() })}
+                  {sendAtLocal ? '' : ` ${t('defaultVisibleFrom')}`}
                 </div>
 
                 {!sendAtLocal && (
                   <div className="mt-1 text-xs text-slate-500">
-                    Note: If you press <b>Publish</b> with empty Send time, it will be sent <b>now</b>.
+                    {t('noteEmptySend')}
                   </div>
                 )}
 
                 {audienceType === 'uids' && (
                   <div className="mt-3">
                     <div className="text-xs text-slate-600 mb-2">
-                      Recipients ({selectedMembers.length}):
+                      {t('recipients', { count: selectedMembers.length })}
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {selectedMembers.map((m) => (
@@ -707,14 +719,14 @@ export default function ComposeNoticePage() {
 
                 {files.length > 0 && (
                   <div className="mt-4 text-sm text-slate-600">
-                    Attachments: <span className="font-semibold">{files.length}</span>
+                    {t('attachmentsCount', { count: files.length })}
                   </div>
                 )}
               </div>
 
               <div className="flex flex-wrap gap-2">
                 <ActionButton variant="secondary" onClick={() => setStep('form')} disabled={busy}>
-                  Back to edit
+                  {t('backToEdit')}
                 </ActionButton>
                 <div className="flex-1" />
                 <ActionButton
@@ -722,14 +734,14 @@ export default function ComposeNoticePage() {
                   onClick={() => handleCreate('draft')}
                   disabled={busy || problems.length > 0}
                 >
-                  Save draft
+                  {t('saveDraft')}
                 </ActionButton>
                 <ActionButton
                   variant="primary"
                   onClick={() => handleCreate('send')}
                   disabled={busy || problems.length > 0}
                 >
-                  Publish {TYPE_LABELS[type]}
+                  {t('publishWithType', { type: TYPE_LABELS_T[type] })}
                 </ActionButton>
               </div>
             </div>
@@ -740,7 +752,7 @@ export default function ComposeNoticePage() {
         {busy && (
           <div className="fixed inset-0 bg-black/20 flex items-center justify-center z-50">
             <div className="rounded-2xl bg-white px-6 py-4 shadow-xl">
-              <div className="text-slate-900 font-semibold">Processing…</div>
+              <div className="text-slate-900 font-semibold">{t('processing')}</div>
             </div>
           </div>
         )}

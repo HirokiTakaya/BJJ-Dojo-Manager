@@ -168,32 +168,35 @@ export default function SignupProgress({
 // ─────────────────────────────────────────────
 // Preset configurations
 // ─────────────────────────────────────────────
+import { useTranslations } from "next-intl";
+
 export function StudentSignupProgress({
   currentStep,
 }: {
   currentStep: "profile" | "login" | "verify" | "complete";
 }) {
+  const t = useTranslations("signup.progress");
   const stepOrder = ["profile", "login", "verify", "complete"];
   const currentIndex = stepOrder.indexOf(currentStep);
 
   const steps: Step[] = [
     {
-      label: "Profile",
+      label: t("profile"),
       completed: currentIndex > 0,
       current: currentStep === "profile",
     },
     {
-      label: "Login",
+      label: t("login"),
       completed: currentIndex > 1,
       current: currentStep === "login",
     },
     {
-      label: "Verify",
+      label: t("verify"),
       completed: currentIndex > 2,
       current: currentStep === "verify",
     },
     {
-      label: "Complete",
+      label: t("complete"),
       completed: currentStep === "complete",
       current: currentStep === "complete",
     },

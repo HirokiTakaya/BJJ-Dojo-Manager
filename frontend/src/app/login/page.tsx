@@ -4,10 +4,12 @@
 import React, { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithEmailAndPassword } from "firebase/auth";
+import { useTranslations } from "next-intl";
 import { authNullable } from "@/firebase";
 import GoogleSignInButton from "@/components/auth/GoogleSignInButton";
 import { handleGoogleRedirectResult } from "@/lib/google";
 import { navigateAfterAuth } from "@/lib/navigateAfterAuth";
+import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 
 // ─────────────────────────────────────────────────────────────
 // Sub-components
@@ -92,6 +94,8 @@ function LoginInner() {
   const router = useRouter();
   const sp = useSearchParams();
   const next = sp.get("next") || "/home";
+  const t = useTranslations("login");
+  const tCommon = useTranslations("common");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -106,9 +110,8 @@ function LoginInner() {
         if (result.needsRoleSelection) {
           router.push("/register/select");
         } else {
-          // ✅ FIX: Google ログインでも必ず emailVerified チェック
-          // handleGoogleRedirectResult が user を返す場合はそれを使う
-          // 返さない場合は auth.currentUser から取得
+          // Even on Google sign-in, enforce emailVerified.
+          // Use the user from result if available; otherwise fall back to authNullable.currentUser.
           const user =
             (result as any).user ??
             (authNullable ? authNullable.currentUser : null);
@@ -127,7 +130,7 @@ function LoginInner() {
   const handleLogin = async () => {
     if (busy) return;
     if (!email.trim() || !password) {
-      setError("Please enter email and password.");
+      setError(t("errors.invalidCredential"));
       return;
     }
 
@@ -144,15 +147,13 @@ function LoginInner() {
         password
       );
 
-      // ✅ FIX: emailVerified チェックを統一関数で行う
+      // Email verification is required — sendSignInLinkToEmail() lives in /verify.
       if (!cred.user.emailVerified) {
-        // メール認証は /verify で sendSignInLinkToEmail() が送信するため不要
-        setSuccess("Please verify your email first. Redirecting...");
+        setSuccess(t("errors.generic"));
         setTimeout(() => router.push("/verify"), 1500);
         return;
       }
 
-      setSuccess("Login successful!");
       navigateAfterAuth(cred.user, router, next);
     } catch (err: any) {
       console.error("[Login] Error:", err);
@@ -162,11 +163,15 @@ function LoginInner() {
         err.code === "auth/wrong-password" ||
         err.code === "auth/invalid-credential"
       ) {
-        setError("Invalid email or password.");
+        setError(t("errors.invalidCredential"));
       } else if (err.code === "auth/too-many-requests") {
-        setError("Too many attempts. Please try again later.");
+        setError(t("errors.tooManyRequests"));
+      } else if (err.code === "auth/user-disabled") {
+        setError(t("errors.userDisabled"));
+      } else if (err.code === "auth/network-request-failed") {
+        setError(t("errors.networkRequestFailed"));
       } else {
-        setError(err.message || "Login failed.");
+        setError(t("errors.generic"));
       }
     } finally {
       setBusy(false);
@@ -178,17 +183,22 @@ function LoginInner() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col items-center justify-center p-6">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col items-center justify-center p-6 relative">
+      {/* Language switcher — pinned top-right */}
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
+
       <div className="w-full max-w-md space-y-6">
         {/* Header */}
         <div className="text-center">
           <img
             src="/assets/jiujitsu-samurai-Logo.png"
-            alt="Logo"
+            alt={tCommon("appName")}
             className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-lg"
           />
-          <h1 className="text-2xl font-bold text-slate-900">Welcome Back</h1>
-          <p className="mt-2 text-slate-500">Sign in to continue</p>
+          <h1 className="text-2xl font-bold text-slate-900">{t("title")}</h1>
+          <p className="mt-2 text-slate-500">{t("subtitle")}</p>
         </div>
 
         {/* Alerts */}
@@ -204,13 +214,13 @@ function LoginInner() {
               onError={(err) => setError(err)}
             />
 
-            <Divider text="or sign in with email" />
+            <Divider text={t("orDivider")} />
 
             {/* Email */}
             <Input
-              label="Email"
+              label={t("emailLabel")}
               type="email"
-              placeholder="Enter your email"
+              placeholder={t("emailPlaceholder")}
               value={email}
               onChange={setEmail}
               onKeyPress={handleKeyPress}
@@ -219,9 +229,9 @@ function LoginInner() {
 
             {/* Password */}
             <Input
-              label="Password"
+              label={t("passwordLabel")}
               type="password"
-              placeholder="Enter your password"
+              placeholder={t("passwordPlaceholder")}
               value={password}
               onChange={setPassword}
               onKeyPress={handleKeyPress}
@@ -235,7 +245,7 @@ function LoginInner() {
                 onClick={() => router.push(`/forgot-password?email=${encodeURIComponent(email)}`)}
                 className="text-sm text-slate-500 hover:text-slate-700 hover:underline"
               >
-                Forgot password?
+                {t("forgotPassword")}
               </button>
             </div>
 
@@ -246,19 +256,19 @@ function LoginInner() {
               disabled={busy}
               className="w-full rounded-full bg-slate-900 px-6 py-3 text-base font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {busy ? "Signing in..." : "Sign In"}
+              {busy ? tCommon("loading") : t("submit")}
             </button>
           </div>
         </Card>
 
         {/* Sign Up Link */}
         <p className="text-center text-sm text-slate-500">
-          Don't have an account?{" "}
+          {t("noAccount")}{" "}
           <button
             onClick={() => router.push("/register/select")}
             className="font-semibold text-slate-900 hover:underline"
           >
-            Sign up
+            {t("createAccount")}
           </button>
         </p>
       </div>

@@ -19,6 +19,7 @@ import (
 	"dojo-manager/backend/internal/domain/session"
 	"dojo-manager/backend/internal/domain/stats"
 	stripedom "dojo-manager/backend/internal/domain/stripe"
+	tuitiondom "dojo-manager/backend/internal/domain/tuition"
 	"dojo-manager/backend/internal/domain/user"
 	"dojo-manager/backend/internal/middleware"
 
@@ -41,6 +42,7 @@ type RouterDeps struct {
 	MembersSvc       *members.Service
 	ProfileSvc       *profile.Service
 	StripeSvc        *stripedom.Service
+	TuitionSvc       *tuitiondom.Service
 	RetentionSvc     *retention.Service
 }
 
@@ -55,6 +57,11 @@ func NewRouter(d RouterDeps) http.Handler {
 	// ===== Stripe Webhook (no auth required) =====
 	if d.StripeSvc != nil {
 		r.Post("/v1/stripe/webhook", d.StripeSvc.HandleWebhook)
+	}
+
+	// ===== Stripe Connect Webhook for tuition (no auth required) =====
+	if d.TuitionSvc != nil {
+		r.Post("/v1/stripe/connect-webhook", d.TuitionSvc.HandleConnectWebhook)
 	}
 
 	// Protected routes
@@ -118,6 +125,31 @@ func NewRouter(d RouterDeps) http.Handler {
 			q := strings.TrimSpace(r.URL.Query().Get("q"))
 			limit := int64(20)
 			out, err := d.DojoSvc.SearchDojos(r.Context(), q, limit)
+			if err != nil {
+				status, msg := mapDojoError(err)
+				Fail(w, status, msg)
+				return
+			}
+			WriteJSON(w, 200, out)
+		})
+
+		// ===== Rename dojo (owner only) =====
+		pr.Put("/v1/dojos/{dojoId}/name", func(w http.ResponseWriter, r *http.Request) {
+			au, _ := middleware.GetAuthUser(r.Context())
+			dojoId := chi.URLParam(r, "dojoId")
+			if dojoId == "" {
+				Fail(w, 400, "missing dojoId")
+				return
+			}
+
+			var in dojo.UpdateDojoNameInput
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				Fail(w, 400, "invalid json")
+				return
+			}
+			in.Trim()
+
+			out, err := d.DojoSvc.UpdateDojoName(r.Context(), au.UID, dojoId, in)
 			if err != nil {
 				status, msg := mapDojoError(err)
 				Fail(w, status, msg)
@@ -1192,6 +1224,240 @@ func NewRouter(d RouterDeps) http.Handler {
 				})
 			})
 		}
+
+		// ===== Tuition (Connect) routes (protected) =====
+		if d.TuitionSvc != nil {
+			// --- Connect onboarding (owner) ---
+			pr.Post("/v1/dojos/{dojoId}/connect/onboard", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+
+				var in tuitiondom.CreateOnboardingInput
+				if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+					Fail(w, 400, "invalid json")
+					return
+				}
+				in.DojoID = chi.URLParam(r, "dojoId")
+
+				url, err := d.TuitionSvc.CreateOnboardingLink(r.Context(), au.UID, in)
+				if err != nil {
+					status, msg := mapTuitionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, map[string]any{"url": url})
+			})
+
+			pr.Get("/v1/dojos/{dojoId}/connect/status", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+				dojoId := chi.URLParam(r, "dojoId")
+				if dojoId == "" {
+					Fail(w, 400, "missing dojoId")
+					return
+				}
+
+				st, err := d.TuitionSvc.GetConnectStatus(r.Context(), au.UID, dojoId)
+				if err != nil {
+					status, msg := mapTuitionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, st)
+			})
+
+			// --- Tuition plans (owner/staff) ---
+			pr.Post("/v1/dojos/{dojoId}/tuition-plans", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+
+				var in tuitiondom.CreateTuitionPlanInput
+				if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+					Fail(w, 400, "invalid json")
+					return
+				}
+				in.DojoID = chi.URLParam(r, "dojoId")
+
+				plan, err := d.TuitionSvc.CreateTuitionPlan(r.Context(), au.UID, in)
+				if err != nil {
+					status, msg := mapTuitionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 201, plan)
+			})
+
+			pr.Get("/v1/dojos/{dojoId}/tuition-plans", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+				dojoId := chi.URLParam(r, "dojoId")
+				if dojoId == "" {
+					Fail(w, 400, "missing dojoId")
+					return
+				}
+
+				plans, err := d.TuitionSvc.ListTuitionPlans(r.Context(), au.UID, dojoId)
+				if err != nil {
+					status, msg := mapTuitionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, map[string]any{"plans": plans})
+			})
+
+			pr.Delete("/v1/dojos/{dojoId}/tuition-plans/{planId}", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+				dojoId := chi.URLParam(r, "dojoId")
+				planId := chi.URLParam(r, "planId")
+				if dojoId == "" || planId == "" {
+					Fail(w, 400, "missing dojoId or planId")
+					return
+				}
+
+				if err := d.TuitionSvc.DeactivateTuitionPlan(r.Context(), au.UID, dojoId, planId); err != nil {
+					status, msg := mapTuitionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, map[string]any{"ok": true})
+			})
+
+			// --- Tuition promo codes (owner: create/delete, owner+staff: list) ---
+			pr.Post("/v1/dojos/{dojoId}/tuition-promos", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+				dojoId := chi.URLParam(r, "dojoId")
+				if dojoId == "" {
+					Fail(w, 400, "missing dojoId")
+					return
+				}
+				var in tuitiondom.CreateTuitionPromoInput
+				if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+					Fail(w, 400, "invalid json")
+					return
+				}
+				in.DojoID = dojoId
+				promo, err := d.TuitionSvc.CreateTuitionPromo(r.Context(), au.UID, in)
+				if err != nil {
+					status, msg := mapTuitionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, promo)
+			})
+
+			pr.Get("/v1/dojos/{dojoId}/tuition-promos", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+				dojoId := chi.URLParam(r, "dojoId")
+				if dojoId == "" {
+					Fail(w, 400, "missing dojoId")
+					return
+				}
+				promos, err := d.TuitionSvc.ListTuitionPromos(r.Context(), au.UID, dojoId)
+				if err != nil {
+					status, msg := mapTuitionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, promos)
+			})
+
+			pr.Delete("/v1/dojos/{dojoId}/tuition-promos/{promoId}", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+				dojoId := chi.URLParam(r, "dojoId")
+				promoId := chi.URLParam(r, "promoId")
+				if dojoId == "" || promoId == "" {
+					Fail(w, 400, "missing dojoId or promoId")
+					return
+				}
+				if err := d.TuitionSvc.DeactivateTuitionPromo(r.Context(), au.UID, dojoId, promoId); err != nil {
+					status, msg := mapTuitionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, map[string]any{"ok": true})
+			})
+
+			// --- Member checkout / portal ---
+			pr.Post("/v1/dojos/{dojoId}/tuition/checkout", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+
+				var in tuitiondom.CreateTuitionCheckoutInput
+				if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+					Fail(w, 400, "invalid json")
+					return
+				}
+				in.DojoID = chi.URLParam(r, "dojoId")
+
+				url, err := d.TuitionSvc.CreateCheckout(r.Context(), au.UID, in)
+				if err != nil {
+					status, msg := mapTuitionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, map[string]any{"url": url})
+			})
+
+			pr.Post("/v1/dojos/{dojoId}/tuition/portal", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+
+				var in tuitiondom.CreateTuitionPortalInput
+				if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+					Fail(w, 400, "invalid json")
+					return
+				}
+				in.DojoID = chi.URLParam(r, "dojoId")
+
+				url, err := d.TuitionSvc.CreatePortal(r.Context(), au.UID, in)
+				if err != nil {
+					status, msg := mapTuitionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, map[string]any{"url": url})
+			})
+
+			// --- Owner-facing status & management ---
+			pr.Get("/v1/dojos/{dojoId}/tuition/status", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+				dojoId := chi.URLParam(r, "dojoId")
+				if dojoId == "" {
+					Fail(w, 400, "missing dojoId")
+					return
+				}
+
+				membersOut, err := d.TuitionSvc.ListMemberTuitionStatus(r.Context(), au.UID, dojoId)
+				if err != nil {
+					status, msg := mapTuitionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, map[string]any{"members": membersOut})
+			})
+
+			pr.Post("/v1/dojos/{dojoId}/tuition/cancel", func(w http.ResponseWriter, r *http.Request) {
+				au, _ := middleware.GetAuthUser(r.Context())
+				dojoId := chi.URLParam(r, "dojoId")
+				if dojoId == "" {
+					Fail(w, 400, "missing dojoId")
+					return
+				}
+
+				var in struct {
+					MemberUID string `json:"memberUid"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+					Fail(w, 400, "invalid json")
+					return
+				}
+				if in.MemberUID == "" {
+					Fail(w, 400, "missing memberUid")
+					return
+				}
+
+				if err := d.TuitionSvc.CancelMemberSubscription(r.Context(), au.UID, dojoId, in.MemberUID); err != nil {
+					status, msg := mapTuitionError(err)
+					Fail(w, status, msg)
+					return
+				}
+				WriteJSON(w, 200, map[string]any{"ok": true})
+			})
+		}
 	})
 
 	return r
@@ -1358,6 +1624,23 @@ func mapRetentionError(err error) (int, string) {
 		return 404, err.Error()
 	case retention.IsErrBadRequest(err):
 		return 400, err.Error()
+	default:
+		return 500, err.Error()
+	}
+}
+func mapTuitionError(err error) (int, string) {
+	if err == nil {
+		return 500, "unknown error"
+	}
+	switch {
+	case tuitiondom.IsErrUnauthorized(err):
+		return 403, err.Error()
+	case tuitiondom.IsErrNotFound(err):
+		return 404, err.Error()
+	case tuitiondom.IsErrBadRequest(err):
+		return 400, err.Error()
+	case tuitiondom.IsErrNotReady(err):
+		return 409, err.Error()
 	default:
 		return 500, err.Error()
 	}

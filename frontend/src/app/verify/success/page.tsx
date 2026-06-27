@@ -1,11 +1,10 @@
 // app/verify/success/page.tsx
-// メール認証完了後のページ。
-// sessionVerified = true を確認し、pendingDojoAction を実行してから /home へ。
 
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { auth, db, waitForUser } from "@/firebase";
 import { isSessionVerified } from "@/lib/sessionVerification";
 import { completePendingDojoAction } from "@/lib/completePendingDojoAction";
@@ -19,6 +18,8 @@ const Alert = ({ kind, children }: { kind: "error"|"success"|"info"; children: R
 
 export default function VerifySuccessPage() {
   const router = useRouter();
+  const t = useTranslations("verify");
+  const tCommon = useTranslations("common");
   const [busy, setBusy] = useState(true);
   const [verified, setVerified] = useState(false);
   const [pendingResult, setPendingResult] = useState("");
@@ -34,32 +35,28 @@ export default function VerifySuccessPage() {
       if (!u) { router.replace("/login"); setBusy(false); return; }
 
       try {
-        // sessionVerified チェック
         const sv = await isSessionVerified(db, u.uid);
         setVerified(sv);
 
         if (!sv) {
-          // まだ認証されていない → /verify へ戻す
           setBusy(false);
           return;
         }
 
-        // pendingDojoAction を実行
         try {
           const result = await completePendingDojoAction(db, u.uid, u.displayName || null);
           if (result) {
             setPendingResult(result);
-            console.log("[VerifySuccess] Pending action:", result);
           }
         } catch (err) {
           console.error("[VerifySuccess] Pending action failed:", err);
-          setError("Setup incomplete. You can retry from the dashboard.");
+          setError(t("setupIncomplete"));
         }
       } finally {
         setBusy(false);
       }
     })();
-  }, [router]);
+  }, [router, t]);
 
   const goHome = useCallback(() => router.replace("/home"), [router]);
   const goBack = useCallback(() => router.replace("/verify"), [router]);
@@ -67,10 +64,10 @@ export default function VerifySuccessPage() {
   if (busy) return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-md text-center space-y-4">
-        <img src={LOGO_SRC} alt="Logo" className="w-16 h-16 mx-auto rounded-2xl shadow-lg" />
+        <img src={LOGO_SRC} alt={tCommon("appName")} className="w-16 h-16 mx-auto rounded-2xl shadow-lg" />
         <div className="flex items-center justify-center gap-2 text-slate-500">
           <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-          <span>Completing setup...</span>
+          <span>{t("completingSetup")}</span>
         </div>
       </div>
     </div>
@@ -79,10 +76,12 @@ export default function VerifySuccessPage() {
   if (!verified) return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-md space-y-6 text-center">
-        <img src={LOGO_SRC} alt="Logo" className="w-16 h-16 mx-auto rounded-2xl shadow-lg" />
-        <h1 className="text-2xl font-bold text-slate-900">Verification Pending</h1>
-        <p className="text-slate-500">Please check your email and click the verification link.</p>
-        <button onClick={goBack} className="w-full max-w-xs mx-auto rounded-full bg-slate-900 px-6 py-3 text-base font-semibold text-white transition hover:bg-slate-800">Back to Verification</button>
+        <img src={LOGO_SRC} alt={tCommon("appName")} className="w-16 h-16 mx-auto rounded-2xl shadow-lg" />
+        <h1 className="text-2xl font-bold text-slate-900">{t("verificationPending")}</h1>
+        <p className="text-slate-500">{t("verificationPendingBody")}</p>
+        <button onClick={goBack} className="w-full max-w-xs mx-auto rounded-full bg-slate-900 px-6 py-3 text-base font-semibold text-white transition hover:bg-slate-800">
+          {t("backToVerification")}
+        </button>
       </div>
     </div>
   );
@@ -90,13 +89,15 @@ export default function VerifySuccessPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-md space-y-6 text-center">
-        <img src={LOGO_SRC} alt="Logo" className="w-16 h-16 mx-auto rounded-2xl shadow-lg" />
+        <img src={LOGO_SRC} alt={tCommon("appName")} className="w-16 h-16 mx-auto rounded-2xl shadow-lg" />
         <div className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center mx-auto"><span className="text-4xl text-emerald-600">✓</span></div>
-        <h1 className="text-2xl font-bold text-emerald-600">Identity Verified!</h1>
+        <h1 className="text-2xl font-bold text-emerald-600">{t("identityVerified")}</h1>
         {pendingResult && <Alert kind="success">✅ {pendingResult}</Alert>}
         {error && <Alert kind="error">⚠️ {error}</Alert>}
-        <p className="text-slate-500">You're all set. Welcome back!</p>
-        <button onClick={goHome} className="w-full max-w-xs mx-auto rounded-full bg-emerald-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-emerald-700">Continue to App</button>
+        <p className="text-slate-500">{t("allSet")}</p>
+        <button onClick={goHome} className="w-full max-w-xs mx-auto rounded-full bg-emerald-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-emerald-700">
+          {t("continueToApp")}
+        </button>
       </div>
     </div>
   );

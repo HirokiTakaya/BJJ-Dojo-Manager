@@ -1,4 +1,3 @@
-
 // src/app/dojos/[dojoId]/members/[memberId]/page.tsx
 import MemberProfileClient from "./MemberProfileClient";
 

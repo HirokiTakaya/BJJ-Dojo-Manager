@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useRef, forwardRef, useImperativeHandle, useState, useCallback, useEffect } from "react";
+import { useTranslations } from "next-intl";
 
 // ✅ クラスタイプの追加
 export type ClassType = "adult" | "kids" | "mixed";
@@ -290,6 +291,13 @@ const WeeklyScheduleGrid = forwardRef<WeeklyScheduleGridRef, WeeklyScheduleGridP
     const gridContainerRef = useRef<HTMLDivElement | null>(null);
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const dayRefs = useRef<Array<HTMLDivElement | null>>([]);
+
+    const tT = useTranslations("timetable");
+    const classTypeLabels: Record<ClassType, string> = {
+      adult: tT("filterAdult"),
+      kids: tT("filterKids"),
+      mixed: tT("filterMixed"),
+    };
 
     // ✅ Zoom state
     const [scale, setScale] = useState(SCALE_DEFAULT);
@@ -627,11 +635,11 @@ const WeeklyScheduleGrid = forwardRef<WeeklyScheduleGridRef, WeeklyScheduleGridP
                                 {!effectiveCompact && !hasOverlap && (
                                   <>
                                     {isReserved ? (
-                                      <span className="font-semibold text-emerald-700">Reserved</span>
+                                      <span className="font-semibold text-emerald-700">{tT("reservedLabel")}</span>
                                     ) : isPast ? (
-                                      <span className="font-semibold text-slate-600">Past</span>
+                                      <span className="font-semibold text-slate-600">{tT("pastLabel")}</span>
                                     ) : (
-                                      <span className={`font-semibold ${typeConfig.textColor}`}>{typeConfig.label}</span>
+                                      <span className={`font-semibold ${typeConfig.textColor}`}>{classTypeLabels[classType]}</span>
                                     )}
                                   </>
                                 )}

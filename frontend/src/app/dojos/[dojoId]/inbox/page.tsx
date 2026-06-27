@@ -3,6 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -53,6 +54,7 @@ export default function InboxPage() {
   const router = useRouter();
   const { user } = useAuth();
   const uid = user?.uid ?? null;
+  const t = useTranslations('notices');
 
   const dojoIdParam = useMemo(() => getParamStr((params as any)?.dojoId), [params]);
 
@@ -123,11 +125,11 @@ export default function InboxPage() {
     const unsub = subscribeNoticesForMember(
       dojoId, uid,
       (r) => { setRows(r); setLoading(false); },
-      () => { setRows([]); setLoading(false); setError('Could not load announcements.'); }
+      () => { setRows([]); setLoading(false); setError(t('couldNotLoad')); }
     );
 
     return unsub;
-  }, [dojoId, uid, accessChecking, accessOk]);
+  }, [dojoId, uid, accessChecking, accessOk, t]);
 
   // Filters
   const [tab, setTab] = useState<'all' | 'notice' | 'memo'>('all');
@@ -151,12 +153,12 @@ export default function InboxPage() {
         id: n.id,
         noticeId: resolveNoticeId(n),
         title: n.title,
-        left: n.type === 'memo' ? 'Note' : 'Announcement',
+        left: n.type === 'memo' ? t('typeMemo') : t('typeNotice'),
         dateText: `${s.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${e.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`,
         uiStatus: computeUiStatus(n),
       };
     });
-  }, [filtered]);
+  }, [filtered, t]);
 
   // Open detail (with permission check)
   const openDetail = useCallback(async (noticeId: string) => {
@@ -171,10 +173,10 @@ export default function InboxPage() {
         // Try inbox fallback route anyway — detail page handles it
         router.push(`/dojos/${dojoId}/notices/${noticeId}`);
       } else {
-        setError('Could not open announcement.');
+        setError(t('couldNotOpen'));
       }
     }
-  }, [dojoId, router]);
+  }, [dojoId, router, t]);
 
   // ─────────────────────────────────────────────
   // Render
@@ -186,7 +188,7 @@ export default function InboxPage() {
         <Navigation />
         <main className="max-w-3xl mx-auto px-4 py-8 pb-24">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 text-center text-gray-500">
-            Please sign in.
+            {t('pleaseSignIn')}
           </div>
         </main>
         <BottomNavigation />
@@ -206,21 +208,25 @@ export default function InboxPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               {dojoName && <p className="text-sm font-medium text-blue-600 mb-1">{dojoName}</p>}
-              <h1 className="text-2xl font-bold text-gray-900">Updates</h1>
-              <p className="text-sm text-gray-500 mt-1">Announcements and notes from your dojo</p>
+              <h1 className="text-2xl font-bold text-gray-900">{t('title')}</h1>
+              <p className="text-sm text-gray-500 mt-1">{t('subtitle')}</p>
             </div>
           </div>
 
           {/* Tabs */}
           <div className="mt-4 flex flex-wrap gap-2">
-            {(['all', 'notice', 'memo'] as const).map((t) => {
-              const labels = { all: 'All', notice: 'Announcements', memo: 'Notes' };
+            {(['all', 'notice', 'memo'] as const).map((tabKey) => {
+              const labels: Record<string, string> = {
+                all: t('tabAll'),
+                notice: t('tabNotices'),
+                memo: t('tabMemos'),
+              };
               return (
-                <button key={t} onClick={() => setTab(t)}
+                <button key={tabKey} onClick={() => setTab(tabKey)}
                   className={`px-4 py-2 rounded-full text-sm font-semibold transition ${
-                    tab === t ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    tab === tabKey ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}>
-                  {labels[t]}
+                  {labels[tabKey]}
                 </button>
               );
             })}
@@ -230,7 +236,7 @@ export default function InboxPage() {
           <div className="mt-3">
             <input
               type="search" value={searchText} onChange={(e) => setSearchText(e.target.value)}
-              placeholder="Search announcements or notes"
+              placeholder={t('searchPlaceholder')}
               className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -242,14 +248,14 @@ export default function InboxPage() {
         {/* No dojo */}
         {!dojoId && !resolving && (
           <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg">
-            No dojo found. Please complete your registration.
+            {t('noDojoFound')}
           </div>
         )}
 
         {/* No access */}
         {dojoId && !accessChecking && !accessOk && (
           <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg">
-            You don't have access to this dojo's announcements.
+            {t('noAccess')}
           </div>
         )}
 
@@ -261,7 +267,7 @@ export default function InboxPage() {
         ) : items.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
             <div className="text-3xl mb-2">📢</div>
-            <p className="text-gray-500">No announcements yet.</p>
+            <p className="text-gray-500">{t('empty')}</p>
           </div>
         ) : (
           <div className="space-y-2">

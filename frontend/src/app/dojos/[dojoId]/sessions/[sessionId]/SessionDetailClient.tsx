@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import { db } from "@/firebase";
 import { doc, getDoc, collection, getDocs, setDoc, serverTimestamp } from "firebase/firestore";
@@ -81,9 +82,10 @@ function normalizeClassType(raw?: any): ClassType {
 // ─────────────────────────────────────────────
 
 function InstructorSelect({
-  instructors, value, onChange, disabled,
+  instructors, value, onChange, disabled, selectFromListLabel, enterManuallyLabel, manualPlaceholder,
 }: {
   instructors: InstructorInfo[]; value: string; onChange: (v: string) => void; disabled?: boolean;
+  selectFromListLabel: string; enterManuallyLabel: string; manualPlaceholder: string;
 }) {
   const [mode, setMode] = useState<"select" | "manual">(
     value && !instructors.find((i) => i.displayName === value) ? "manual" : "select"
@@ -97,8 +99,8 @@ function InstructorSelect({
         disabled={disabled}
         className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
       >
-        <option value="select">Select from list</option>
-        <option value="manual">Enter manually</option>
+        <option value="select">{selectFromListLabel}</option>
+        <option value="manual">{enterManuallyLabel}</option>
       </select>
 
       {mode === "select" ? (
@@ -110,7 +112,7 @@ function InstructorSelect({
           ))}
         </select>
       ) : (
-        <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder="Enter instructor name..."
+        <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={manualPlaceholder}
           disabled={disabled}
           className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
       )}
@@ -123,9 +125,10 @@ function InstructorSelect({
 // ─────────────────────────────────────────────
 
 function ClassTypeSelect({
-  value, onChange, disabled,
+  value, onChange, disabled, labels,
 }: {
   value: ClassType; onChange: (v: ClassType) => void; disabled?: boolean;
+  labels: Record<ClassType, string>;
 }) {
   return (
     <div className="flex flex-wrap gap-2">
@@ -145,7 +148,7 @@ function ClassTypeSelect({
               disabled ? "cursor-not-allowed opacity-50" : "",
             ].join(" ")}
           >
-            {opt.emoji} {opt.label}
+            {opt.emoji} {labels[opt.value]}
           </button>
         );
       })}
@@ -164,6 +167,14 @@ export default function SessionDetailClient(props: Props) {
   const params = useParams<{ dojoId?: string; sessionId?: string }>();
   const sp = useSearchParams();
   const { user, loading: authLoading } = useAuth();
+  const t = useTranslations("session");
+  const tTimetable = useTranslations("timetable");
+
+  const classTypeLabels: Record<ClassType, string> = {
+    adult: tTimetable("filterAdult"),
+    kids: tTimetable("filterKids"),
+    mixed: tTimetable("filterMixed"),
+  };
 
   const dojoId = useMemo(() => props.dojoId ?? sp.get("dojoId") ?? params?.dojoId ?? "", [props.dojoId, sp, params?.dojoId]);
   const sessionId = useMemo(() => props.sessionId ?? sp.get("sessionId") ?? params?.sessionId ?? "", [props.sessionId, sp, params?.sessionId]);
@@ -469,7 +480,7 @@ export default function SessionDetailClient(props: Props) {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-gray-900">Edit Class</h3>
+                <h3 className="text-xl font-bold text-gray-900">{t("editClass")}</h3>
                 <button onClick={() => setEditOpen(false)} className="text-gray-400 hover:text-gray-600">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
@@ -477,25 +488,25 @@ export default function SessionDetailClient(props: Props) {
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t("titleLabel")}</label>
                   <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)}
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Weekday</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{t("weekdayLabel")}</label>
                     <select value={editWeekday} onChange={(e) => setEditWeekday(Number(e.target.value))}
                       className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500">
                       {WEEKDAYS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Start</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{t("startLabel")}</label>
                     <input value={editStartHHMM} onChange={(e) => setEditStartHHMM(e.target.value)} placeholder="07:00"
                       className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Duration</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{t("durationLabel")}</label>
                     <input value={editDurationMin} onChange={(e) => setEditDurationMin(Number(e.target.value || "0"))} type="number"
                       className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
@@ -503,17 +514,18 @@ export default function SessionDetailClient(props: Props) {
 
                 {/* ✅ Class Type 選択 */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Class Type</label>
-                  <ClassTypeSelect value={editClassType} onChange={setEditClassType} disabled={busy} />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t("classTypeLabel")}</label>
+                  <ClassTypeSelect value={editClassType} onChange={setEditClassType} disabled={busy} labels={classTypeLabels} />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Instructor</label>
-                  <InstructorSelect instructors={instructors} value={editInstructor} onChange={setEditInstructor} disabled={busy} />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t("instructorLabel")}</label>
+                  <InstructorSelect instructors={instructors} value={editInstructor} onChange={setEditInstructor} disabled={busy}
+                    selectFromListLabel={t("selectFromList")} enterManuallyLabel={t("enterManually")} manualPlaceholder={t("enterInstructorName")} />
                 </div>
                 <div className="flex gap-3 pt-2">
-                  <button onClick={() => setEditOpen(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition">Cancel</button>
-                  <button onClick={onSaveEdit} disabled={busy} className="flex-1 py-2.5 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50">{busy ? "Saving..." : "Save"}</button>
+                  <button onClick={() => setEditOpen(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition">{t("cancel")}</button>
+                  <button onClick={onSaveEdit} disabled={busy} className="flex-1 py-2.5 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50">{busy ? t("saving") : t("save")}</button>
                 </div>
               </div>
             </div>
@@ -526,16 +538,16 @@ export default function SessionDetailClient(props: Props) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setDeleteOpen(false)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
-              <h3 className="text-xl font-bold text-red-700 mb-3">Delete Class?</h3>
+              <h3 className="text-xl font-bold text-red-700 mb-3">{t("deleteClassQuestion")}</h3>
               <p className="text-sm text-gray-700 mb-3">
-                Are you sure you want to delete <span className="font-semibold">&quot;{session?.title}&quot;</span>?
+                {session?.title ? `「${session.title}」を削除しますか?` : ""}
               </p>
               <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800 mb-4">
-                This will delete the class template. Existing sessions will remain.
+                {t("deleteConfirm")}
               </div>
               <div className="flex gap-3">
-                <button onClick={() => setDeleteOpen(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition">Cancel</button>
-                <button onClick={onConfirmDelete} disabled={busy} className="flex-1 py-2.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition disabled:opacity-50">{busy ? "Deleting..." : "Delete"}</button>
+                <button onClick={() => setDeleteOpen(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition">{t("cancel")}</button>
+                <button onClick={onConfirmDelete} disabled={busy} className="flex-1 py-2.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition disabled:opacity-50">{busy ? t("deleting") : t("delete")}</button>
               </div>
             </div>
           </div>

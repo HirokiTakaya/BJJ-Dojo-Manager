@@ -1,3 +1,4 @@
+
 package dojo
 
 import (
@@ -63,6 +64,30 @@ func (s *Service) SearchDojos(ctx context.Context, q string, limit int64) ([]Doj
 		limit = 20
 	}
 	return s.repo.SearchDojosByNamePrefix(ctx, q, limit)
+}
+
+// UpdateDojoName lets an OWNER rename the dojo. Staff cannot rename.
+func (s *Service) UpdateDojoName(ctx context.Context, ownerUid, dojoId string, in UpdateDojoNameInput) (*Dojo, error) {
+	in.Trim()
+	if dojoId == "" {
+		return nil, fmt.Errorf("%w: dojoId required", ErrBadRequest)
+	}
+	if in.Name == "" {
+		return nil, fmt.Errorf("%w: name is required", ErrBadRequest)
+	}
+	if len([]rune(in.Name)) > 80 {
+		return nil, fmt.Errorf("%w: name is too long (max 80 characters)", ErrBadRequest)
+	}
+
+	isOwner, err := s.repo.IsOwner(ctx, dojoId, ownerUid)
+	if err != nil {
+		return nil, fmt.Errorf("%w: dojo not found", ErrNotFound)
+	}
+	if !isOwner {
+		return nil, fmt.Errorf("%w: only the dojo owner can rename the dojo", ErrUnauthorized)
+	}
+
+	return s.repo.UpdateDojoName(ctx, dojoId, in.Name)
 }
 
 func (s *Service) CreateJoinRequest(ctx context.Context, studentUid, dojoId string, in CreateJoinRequestInput) (*JoinRequest, error) {
@@ -137,10 +162,10 @@ func (s *Service) ApproveJoinRequest(ctx context.Context, staffUid, dojoId, stud
 	}
 
 	return map[string]any{
-		"ok":        true,
-		"dojoId":    dojoId,
+		"ok":         true,
+		"dojoId":     dojoId,
 		"studentUid": studentUid,
-		"status":    "approved",
+		"status":     "approved",
 	}, nil
 }
 

@@ -3,6 +3,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { SubscriptionInfo, getUsagePercentage } from '@/hooks/useSubscription';
 
 interface PlanLimitBannerProps {
@@ -12,20 +13,21 @@ interface PlanLimitBannerProps {
 }
 
 export function PlanLimitBanner({ subscription, dojoId, resource }: PlanLimitBannerProps) {
+  const t = useTranslations('planLimit');
+
   if (!subscription) return null;
 
-  // Check if any resource is at 80%+ usage
-  const resources = resource 
-    ? [resource] 
+  const resources = resource
+    ? [resource]
     : (['members', 'staff', 'announcements', 'classes'] as const);
-  
+
   let highestUsage = 0;
   let highestResource = '';
 
   for (const res of resources) {
     const usage = subscription.usage[res];
-    if (usage.limit === -1) continue; // Skip unlimited
-    
+    if (usage.limit === -1) continue;
+
     const percentage = getUsagePercentage(usage.current, usage.limit);
     if (percentage > highestUsage) {
       highestUsage = percentage;
@@ -33,11 +35,18 @@ export function PlanLimitBanner({ subscription, dojoId, resource }: PlanLimitBan
     }
   }
 
-  // Don't show banner if under 80%
   if (highestUsage < 80) return null;
 
   const isAtLimit = highestUsage >= 100;
   const usage = subscription.usage[highestResource as keyof typeof subscription.usage];
+
+  // Translate the resource name (with safe fallback if key missing)
+  let resourceLabel = highestResource;
+  try {
+    resourceLabel = t(highestResource as any);
+  } catch {
+    /* keep raw label */
+  }
 
   return (
     <div
@@ -81,13 +90,13 @@ export function PlanLimitBanner({ subscription, dojoId, resource }: PlanLimitBan
           <div>
             <p className={`font-medium ${isAtLimit ? 'text-red-800' : 'text-yellow-800'}`}>
               {isAtLimit
-                ? `${highestResource} limit reached (${usage.current}/${usage.limit})`
-                : `Approaching ${highestResource} limit (${usage.current}/${usage.limit})`}
+                ? t('resourceLimitReached', { resource: resourceLabel, current: usage.current, limit: usage.limit })
+                : t('approachingResourceLimit', { resource: resourceLabel, current: usage.current, limit: usage.limit })}
             </p>
             <p className={`text-sm ${isAtLimit ? 'text-red-600' : 'text-yellow-600'}`}>
               {isAtLimit
-                ? `Upgrade your plan to add more ${highestResource}.`
-                : `You're using ${highestUsage}% of your ${highestResource} quota.`}
+                ? t('upgradeToAddMore', { resource: resourceLabel })
+                : t('usingPercent', { percent: highestUsage, resource: resourceLabel })}
             </p>
           </div>
         </div>
@@ -99,7 +108,7 @@ export function PlanLimitBanner({ subscription, dojoId, resource }: PlanLimitBan
               : 'bg-yellow-600 text-white hover:bg-yellow-700'
           } transition`}
         >
-          Upgrade Plan
+          {t('upgradePlan')}
         </Link>
       </div>
     </div>
@@ -114,6 +123,7 @@ interface UpgradeBadgeProps {
 }
 
 export function UpgradeBadge({ show, dojoId, size = 'sm' }: UpgradeBadgeProps) {
+  const t = useTranslations('planLimit');
   if (!show) return null;
 
   return (
@@ -136,7 +146,7 @@ export function UpgradeBadge({ show, dojoId, size = 'sm' }: UpgradeBadgeProps) {
           d="M13 10V3L4 14h7v7l9-11h-7z"
         />
       </svg>
-      Upgrade
+      {t('upgradeBadge')}
     </Link>
   );
 }

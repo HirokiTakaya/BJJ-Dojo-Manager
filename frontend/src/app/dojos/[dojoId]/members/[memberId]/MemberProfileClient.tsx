@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import { db } from "@/firebase";
 import { useDojoName } from "@/hooks/useDojoName";
@@ -324,6 +325,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
   const params = useParams();
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
+  const t = useTranslations("memberProfile");
 
   // Resolve IDs — handle both [dojoId] and [dojold] folder name variants
   const dojoId = useMemo(() => {
@@ -786,14 +788,14 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
 
         {/* ✅ NEW: Waiver Status Card */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-4">Waiver Status</h3>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-4">{t("waiverStatus")}</h3>
 
           {waiverSigned ? (
             <div className="space-y-4">
               <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3">
                 <span className="text-2xl">✅</span>
                 <div>
-                  <p className="text-sm font-semibold text-green-800">Waiver Signed</p>
+                  <p className="text-sm font-semibold text-green-800">{t("waiverSigned")}</p>
                   <p className="text-xs text-green-600">Signed on {formatDate(latestWaiver?.signedAt || latestWaiver?.createdAt)}</p>
                 </div>
               </div>
@@ -801,7 +803,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
               {/* Signature preview */}
               {latestWaiver?.signature?.strokesJson && latestWaiver.signature.strokesJson !== "[]" && (
                 <div>
-                  <p className="text-xs font-medium text-gray-500 mb-2">Signature</p>
+                  <p className="text-xs font-medium text-gray-500 mb-2">{t("signature")}</p>
                   <SignaturePreview strokesJson={latestWaiver.signature.strokesJson} />
                 </div>
               )}
@@ -855,7 +857,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
             <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
               <span className="text-2xl">❌</span>
               <div className="flex-1">
-                <p className="text-sm font-semibold text-red-800">Waiver Not Signed</p>
+                <p className="text-sm font-semibold text-red-800">{t("waiverNotSigned")}</p>
                 <p className="text-xs text-red-600">This member has not signed the waiver yet.</p>
               </div>
               {isSelf && (
@@ -873,29 +875,29 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
         {/* Edit Mode */}
         {editMode ? (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4">Edit Profile</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-4">{t("editProfile")}</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t("displayNameLabel")}</label>
                 <input value={editData.displayName || ""} onChange={(e) => setEditData((p) => ({ ...p, displayName: e.target.value }))} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t("phoneLabel")}</label>
                   <input value={editData.phone || ""} onChange={(e) => setEditData((p) => ({ ...p, phone: e.target.value }))} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t("dobLabel")}</label>
                   <input type="date" value={editData.dateOfBirth || ""} onChange={(e) => setEditData((p) => ({ ...p, dateOfBirth: e.target.value }))} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t("genderLabel")}</label>
                 <select value={editData.gender || ""} onChange={(e) => setEditData((p) => ({ ...p, gender: e.target.value }))} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="">Select...</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="other">Other</option>
+                  <option value="male">{t("genderMale")}</option>
+                  <option value="female">{t("genderFemale")}</option>
+                  <option value="other">{t("genderOther")}</option>
                 </select>
               </div>
 
@@ -903,19 +905,19 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
               <div className="bg-red-50 border border-red-200 rounded-xl p-4">
                 <p className="text-sm font-semibold text-red-700 mb-3">🚨 Emergency Contact</p>
                 <div className="space-y-2">
-                  <input placeholder="Name" value={editData.emergencyContact?.name || ""} onChange={(e) => setEditData((p) => ({ ...p, emergencyContact: { name: e.target.value, phone: p.emergencyContact?.phone || "", relationship: p.emergencyContact?.relationship || "" } }))} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  <input placeholder="Phone" value={editData.emergencyContact?.phone || ""} onChange={(e) => setEditData((p) => ({ ...p, emergencyContact: { name: p.emergencyContact?.name || "", phone: e.target.value, relationship: p.emergencyContact?.relationship || "" } }))} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  <input placeholder="Relationship" value={editData.emergencyContact?.relationship || ""} onChange={(e) => setEditData((p) => ({ ...p, emergencyContact: { name: p.emergencyContact?.name || "", phone: p.emergencyContact?.phone || "", relationship: e.target.value } }))} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input placeholder={t("emergencyName")} value={editData.emergencyContact?.name || ""} onChange={(e) => setEditData((p) => ({ ...p, emergencyContact: { name: e.target.value, phone: p.emergencyContact?.phone || "", relationship: p.emergencyContact?.relationship || "" } }))} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input placeholder={t("emergencyPhone")} value={editData.emergencyContact?.phone || ""} onChange={(e) => setEditData((p) => ({ ...p, emergencyContact: { name: p.emergencyContact?.name || "", phone: e.target.value, relationship: p.emergencyContact?.relationship || "" } }))} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input placeholder={t("emergencyRelationship")} value={editData.emergencyContact?.relationship || ""} onChange={(e) => setEditData((p) => ({ ...p, emergencyContact: { name: p.emergencyContact?.name || "", phone: p.emergencyContact?.phone || "", relationship: e.target.value } }))} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t("notesLabel")}</label>
                 <textarea value={editData.notes || ""} onChange={(e) => setEditData((p) => ({ ...p, notes: e.target.value }))} rows={3} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
               </div>
 
               <div className="flex justify-end gap-3">
-                <button onClick={() => { setEditMode(false); setEditData(profile || {}); }} className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition">Cancel</button>
+                <button onClick={() => { setEditMode(false); setEditData(profile || {}); }} className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition">{t("cancel")}</button>
                 <button onClick={saveProfile} disabled={busy} className="px-4 py-2.5 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50">{busy ? "Saving..." : "Save"}</button>
               </div>
             </div>
@@ -926,22 +928,22 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
             <div className="grid grid-cols-3 gap-4 mb-6">
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 text-center">
                 <p className="text-3xl font-bold text-green-600">{attendanceRate}%</p>
-                <p className="text-xs text-gray-500 mt-1">Attendance</p>
+                <p className="text-xs text-gray-500 mt-1">{t("statAttendance")}</p>
               </div>
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 text-center">
                 <p className="text-3xl font-bold text-blue-600">{attendance.length}</p>
-                <p className="text-xs text-gray-500 mt-1">Sessions</p>
+                <p className="text-xs text-gray-500 mt-1">{t("statSessions")}</p>
               </div>
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 text-center">
                 <p className="text-3xl font-bold text-purple-600">{rankHistory.length}</p>
-                <p className="text-xs text-gray-500 mt-1">Promotions</p>
+                <p className="text-xs text-gray-500 mt-1">{t("statPromotions")}</p>
               </div>
             </div>
 
             {/* Contact Info */}
             {(profile.phone || profile.emergencyContact) && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-3">Contact Info</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-3">{t("contactInfo")}</h3>
                 {profile.phone && <p className="text-sm text-gray-700 mb-2">📞 {profile.phone}</p>}
                 {profile.emergencyContact && (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 mt-2">
@@ -954,7 +956,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
             )}
             {profile.notes && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-2">Notes</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-2">{t("notesLabel")}</h3>
                 <p className="text-sm text-gray-700 whitespace-pre-wrap">{profile.notes}</p>
               </div>
             )}
@@ -963,7 +965,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
 
         {/* Attendance History */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-4">Recent Attendance</h3>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-4">{t("recentAttendance")}</h3>
           {attendance.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-4">No attendance records yet.</p>
           ) : (
@@ -989,7 +991,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
 
         {/* Rank History */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-4">Rank History</h3>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-4">{t("rankHistory")}</h3>
           {rankHistory.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-4">No rank changes recorded.</p>
           ) : (
@@ -1037,7 +1039,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
               <div className="space-y-4">
                 {/* Belt Select */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Belt</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t("beltLabel")}</label>
                   <select value={newBelt} onChange={(e) => {
                     const b = e.target.value as Belt;
                     setNewBelt(b);
@@ -1056,7 +1058,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
 
                 {isKidsBelt(newBelt) && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Kids System</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{t("kidsSystemLabel")}</label>
                     <select value={stripeMode} onChange={(e) => {
                       const m = e.target.value as "manual" | "ibjjf";
                       setStripeMode(m);
@@ -1100,7 +1102,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
                     ))}
                   </div>
                   <div className="flex items-center gap-3 mt-3">
-                    <button onClick={() => { setNewPattern(["none","none","none","none"]); if (stripeMode === "ibjjf") setStripeMode("manual"); }} className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-200">Clear</button>
+                    <button onClick={() => { setNewPattern(["none","none","none","none"]); if (stripeMode === "ibjjf") setStripeMode("manual"); }} className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-200">{t("clear")}</button>
                     <span className="text-xs text-gray-500">Quick:</span>
                     {[0,1,2,3,4].map((n) => (
                       <button key={n} onClick={() => {
@@ -1115,7 +1117,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
                 </div>
 
                 <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-center">
-                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Preview</p>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">{t("preview")}</p>
                   <BeltVisual belt={newBelt} pattern={stripeMode === "ibjjf" && isKidsBelt(newBelt) ? kidsDegreeToPattern(kidsDegree) : newPattern} size="lg" />
                 </div>
 
@@ -1125,7 +1127,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
                 </div>
 
                 <div className="flex gap-3 pt-2">
-                  <button onClick={() => setRankModalOpen(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition">Cancel</button>
+                  <button onClick={() => setRankModalOpen(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition">{t("cancel")}</button>
                   <button onClick={updateRank} disabled={busy} className="flex-1 py-2.5 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50">{busy ? "Saving..." : "Update Rank"}</button>
                 </div>
               </div>

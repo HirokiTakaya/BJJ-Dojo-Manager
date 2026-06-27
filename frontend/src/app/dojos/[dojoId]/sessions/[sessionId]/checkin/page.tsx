@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import { db } from "@/firebase";
 import { useDojoName } from "@/hooks/useDojoName";
@@ -116,6 +117,7 @@ export default function CheckInPage() {
   const router = useRouter();
   const params = useParams();
   const { user, loading: authLoading } = useAuth();
+  const t = useTranslations("checkin");
 
   const dojoId = (params?.dojoId as string) || "";
   const sessionId = (params?.sessionId as string) || "";
@@ -143,7 +145,7 @@ export default function CheckInPage() {
   useEffect(() => {
     if (authLoading || !user) return;
     if (!dojoId || !sessionId) {
-      setError("Missing dojo or session ID.");
+      setError(t("missingIds"));
       setLoading(false);
       return;
     }
@@ -159,7 +161,7 @@ export default function CheckInPage() {
         // Session
         const sessionSnap = await getDoc(doc(db, "dojos", dojoId, "sessions", sessionId));
         if (!sessionSnap.exists()) {
-          setError("Session not found.");
+          setError(t("sessionNotFound"));
           setLoading(false);
           return;
         }
@@ -184,7 +186,7 @@ export default function CheckInPage() {
           }
         }
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || "Failed to load.");
+        if (!cancelled) setError(e?.message || t("loadFailed"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -223,8 +225,8 @@ export default function CheckInPage() {
       const memberSnap = await getDoc(doc(db, "dojos", dojoId, "members", user.uid));
       const displayName =
         memberSnap.exists()
-          ? memberSnap.data()?.displayName || user.displayName || user.email || "Unknown"
-          : user.displayName || user.email || "Unknown";
+          ? memberSnap.data()?.displayName || user.displayName || user.email || t("unknownMember")
+          : user.displayName || user.email || t("unknownMember");
 
       await setDoc(doc(db, "dojos", dojoId, "sessions", sessionId, "attendees", user.uid), {
         uid: user.uid,
@@ -261,7 +263,7 @@ export default function CheckInPage() {
 
         await setDoc(doc(db, "dojos", dojoId, "sessions", sessionId, "attendees", member.uid), {
           uid: member.uid,
-          displayName: member.displayName || "Unknown",
+          displayName: member.displayName || t("unknownMember"),
           checkedInAt: serverTimestamp(),
           checkedInBy: user.uid,
           method: "staff",
@@ -288,9 +290,9 @@ export default function CheckInPage() {
       try {
         await deleteDoc(doc(db, "dojos", dojoId, "sessions", sessionId, "attendees", uid));
         await refreshAttendees();
-        setSuccess("Removed.");
+        setSuccess(t("removed"));
       } catch (e: any) {
-        setError(e?.message || "Remove failed.");
+        setError(e?.message || t("removeFailed"));
       } finally {
         setBusy(false);
       }
@@ -375,19 +377,19 @@ export default function CheckInPage() {
               <div className="flex items-center gap-2 mt-3">
                 {isToday ? (
                   <span className="px-2.5 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold">
-                    Today
+                    {t("today")}
                   </span>
                 ) : isPast ? (
                   <span className="px-2.5 py-1 bg-gray-100 text-gray-500 rounded-full text-xs font-semibold">
-                    Past
+                    {t("past")}
                   </span>
                 ) : (
                   <span className="px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold">
-                    Upcoming
+                    {t("upcoming")}
                   </span>
                 )}
                 <span className="px-2.5 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold">
-                  {attendees.length} checked in
+                  {t("checkedInCount", { count: attendees.length })}
                 </span>
               </div>
             </div>
@@ -400,27 +402,27 @@ export default function CheckInPage() {
             {isCheckedIn ? (
               <div className="text-center py-4">
                 <div className="text-5xl mb-3">✅</div>
-                <p className="text-xl font-bold text-green-700">You're checked in!</p>
-                <p className="text-sm text-gray-500 mt-1">Enjoy your training 🥋</p>
+                <p className="text-xl font-bold text-green-700">{t("youAreCheckedIn")}</p>
+                <p className="text-sm text-gray-500 mt-1">{t("enjoyTraining")}</p>
               </div>
             ) : isPast ? (
               <div className="text-center py-4">
                 <div className="text-4xl mb-3">⏰</div>
-                <p className="text-gray-500">This session has passed.</p>
+                <p className="text-gray-500">{t("sessionPassed")}</p>
               </div>
             ) : (
               <div className="text-center py-4">
-                <p className="text-gray-600 mb-4">Ready to train?</p>
+                <p className="text-gray-600 mb-4">{t("readyToTrain")}</p>
                 <button
                   onClick={handleSelfCheckIn}
                   disabled={busy}
                   className="px-8 py-4 bg-green-600 text-white rounded-2xl text-lg font-bold hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-green-200"
                 >
-                  {busy ? "Checking in..." : "✋ Check In"}
+                  {busy ? t("checkingIn") : t("checkIn")}
                 </button>
                 {!isToday && (
                   <p className="text-xs text-amber-600 mt-3">
-                    Note: This session is not today ({session.dateKey})
+                    {t("noteNotToday", { date: session.dateKey })}
                   </p>
                 )}
               </div>
@@ -433,9 +435,9 @@ export default function CheckInPage() {
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
             <div className="flex items-center justify-between gap-3 mb-4">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">
-                Check In Members
+                {t("checkInMembers")}
               </h2>
-              <span className="text-sm text-gray-400">{uncheckedMembers.length} remaining</span>
+              <span className="text-sm text-gray-400">{t("remaining", { count: uncheckedMembers.length })}</span>
             </div>
 
             {/* Search */}
@@ -444,7 +446,7 @@ export default function CheckInPage() {
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search members..."
+                placeholder={t("searchMembers")}
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
@@ -452,7 +454,7 @@ export default function CheckInPage() {
             {/* Quick check-in buttons */}
             {uncheckedMembers.length === 0 ? (
               <div className="text-center py-4 text-gray-400 text-sm">
-                {members.length === 0 ? "No members loaded." : "Everyone is checked in! 🎉"}
+                {members.length === 0 ? t("noMembersLoaded") : t("everyoneCheckedIn")}
               </div>
             ) : (
               <div className="space-y-2 max-h-72 overflow-y-auto">
@@ -476,7 +478,7 @@ export default function CheckInPage() {
                           </span>
                           {m.stripes ? (
                             <span className="text-xs text-gray-400">
-                              {m.stripes} stripe{m.stripes !== 1 && "s"}
+                              {m.stripes !== 1 ? t("stripePlural", { count: m.stripes }) : t("stripeSingular", { count: m.stripes })}
                             </span>
                           ) : null}
                         </div>
@@ -503,14 +505,14 @@ export default function CheckInPage() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">
-              Attendance ({attendees.length})
+              {t("attendanceTitle", { count: attendees.length })}
             </h2>
           </div>
 
           {attendees.length === 0 ? (
             <div className="text-center py-6">
               <div className="text-3xl mb-2">📋</div>
-              <p className="text-gray-400 text-sm">No one checked in yet.</p>
+              <p className="text-gray-400 text-sm">{t("noOneCheckedInYet")}</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -526,7 +528,7 @@ export default function CheckInPage() {
                     <p className="font-medium text-gray-900 truncate">{a.displayName}</p>
                     <p className="text-xs text-gray-500">
                       {formatTimestamp(a.checkedInAt)}
-                      {a.method === "staff" && " · by staff"}
+                      {a.method === "staff" && ` ${t("byStaff")}`}
                     </p>
                   </div>
                   {isStaff && (
@@ -534,7 +536,7 @@ export default function CheckInPage() {
                       onClick={() => handleRemoveAttendee(a.uid)}
                       disabled={busy}
                       className="text-red-400 hover:text-red-600 transition flex-shrink-0 disabled:opacity-50"
-                      title="Remove"
+                      title={t("removeAttendee")}
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

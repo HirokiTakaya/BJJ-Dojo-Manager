@@ -1,10 +1,13 @@
 // app/dojos/[dojoId]/settings/page.tsx
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { useAuth } from '@/providers/AuthProvider';
 import Navigation, { BottomNavigation } from '@/components/Navigation';
+import { getDojo, renameDojo } from '@/lib/dojos-api';
+import { invalidateDojoNameCache } from '@/hooks/useDojoName';
 
 const GO_API_URL = process.env.NEXT_PUBLIC_GO_API_URL || '';
 
@@ -19,6 +22,7 @@ export default function SettingsPage() {
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();
+  const t = useTranslations('settings');
   const dojoId = typeof params?.dojoId === 'string' ? params.dojoId : '';
 
   // Promo code state
@@ -26,6 +30,60 @@ export default function SettingsPage() {
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoSuccess, setPromoSuccess] = useState('');
   const [promoError, setPromoError] = useState('');
+
+  // Dojo name (rename) state
+  const [dojoName, setDojoName] = useState('');
+  const [originalName, setOriginalName] = useState('');
+  const [nameLoading, setNameLoading] = useState(false);
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameSuccess, setNameSuccess] = useState('');
+  const [nameError, setNameError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!dojoId || !user) return;
+      setNameLoading(true);
+      try {
+        const { dojo } = await getDojo(dojoId);
+        if (!cancelled) {
+          setDojoName(dojo.name || '');
+          setOriginalName(dojo.name || '');
+        }
+      } catch {
+        // silently ignore; name section just won't prefill
+      } finally {
+        if (!cancelled) setNameLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [dojoId, user]);
+
+  const handleSaveName = async () => {
+    const next = dojoName.trim();
+    if (!next || next === originalName.trim()) return;
+
+    setNameSaving(true);
+    setNameSuccess('');
+    setNameError('');
+    try {
+      const { dojo } = await renameDojo(dojoId, next);
+      setOriginalName(dojo.name || next);
+      setDojoName(dojo.name || next);
+      invalidateDojoNameCache(dojoId);
+      setNameSuccess(t('renameSuccess'));
+    } catch (e: any) {
+      // Backend returns 403 for non-owners
+      const msg =
+        e?.status === 403 ? t('renameForbidden') : t('renameFailed');
+      setNameError(msg);
+    } finally {
+      setNameSaving(false);
+    }
+  };
 
   const handleApplyPromo = async () => {
     if (!promoCode.trim() || !user || !dojoId) return;
@@ -48,14 +106,14 @@ export default function SettingsPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        setPromoError(data.error || 'Failed to apply promo code.');
+        setPromoError(data.error || t('promoFailedDefault'));
         return;
       }
 
-      setPromoSuccess(data.message || 'Promo code applied successfully!');
+      setPromoSuccess(data.message || t('promoSuccessDefault'));
       setPromoCode('');
     } catch {
-      setPromoError('Network error. Please try again.');
+      setPromoError(t('networkError'));
     } finally {
       setPromoLoading(false);
     }
@@ -63,8 +121,8 @@ export default function SettingsPage() {
 
   const settingsItems: SettingsItem[] = [
     {
-      title: 'Billing & Plans',
-      description: 'Manage your subscription and view usage',
+      title: t('billingAndPlans'),
+      description: t('billingAndPlansDesc'),
       href: `/dojos/${dojoId}/settings/billing`,
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -77,7 +135,39 @@ export default function SettingsPage() {
         </svg>
       ),
     },
+    {
+      title: t('payoutSettings'),
+      description: t('payoutSettingsDesc'),
+      href: `/dojos/${dojoId}/settings/payments`,
+      icon: (
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
+          />
+        </svg>
+      ),
+    },
+    {
+      title: t('tuitionManage'),
+      description: t('tuitionManageDesc'),
+      href: `/dojos/${dojoId}/settings/tuition`,
+      icon: (
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+      ),
+    },
   ];
+
+  const nameChanged = dojoName.trim() !== '' && dojoName.trim() !== originalName.trim();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -92,13 +182,65 @@ export default function SettingsPage() {
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-          Back to Dojo
+          {t('back')}
         </button>
 
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
-          <p className="text-gray-600 mt-2">Manage your dojo settings</p>
+          <h1 className="text-3xl font-bold text-gray-900">{t('title')}</h1>
+          <p className="text-gray-600 mt-2">{t('subtitle')}</p>
+        </div>
+
+        {/* Dojo name (rename) — owner only; backend enforces permission */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mb-8">
+          <div className="mb-3">
+            <h3 className="font-semibold text-gray-900">{t('dojoNameTitle')}</h3>
+            <p className="text-sm text-gray-500">{t('dojoNameDesc')}</p>
+          </div>
+
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={dojoName}
+              onChange={(e) => {
+                setDojoName(e.target.value);
+                setNameError('');
+                setNameSuccess('');
+              }}
+              maxLength={80}
+              placeholder={t('dojoNamePlaceholder')}
+              disabled={nameLoading || nameSaving}
+              className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && nameChanged) handleSaveName();
+              }}
+            />
+            <button
+              onClick={handleSaveName}
+              disabled={!nameChanged || nameSaving || nameLoading}
+              className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {nameSaving ? t('saving') : t('save')}
+            </button>
+          </div>
+
+          {nameSuccess && (
+            <div className="mt-3 flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              {nameSuccess}
+            </div>
+          )}
+
+          {nameError && (
+            <div className="mt-3 flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              {nameError}
+            </div>
+          )}
         </div>
 
         {/* Settings List */}
@@ -142,8 +284,8 @@ export default function SettingsPage() {
               </svg>
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900">Promo Code</h3>
-              <p className="text-sm text-gray-500">Have a promo code? Enter it below to unlock features.</p>
+              <h3 className="font-semibold text-gray-900">{t('promoCodeTitle')}</h3>
+              <p className="text-sm text-gray-500">{t('promoCodeDesc')}</p>
             </div>
           </div>
 
@@ -156,7 +298,7 @@ export default function SettingsPage() {
                 setPromoError('');
                 setPromoSuccess('');
               }}
-              placeholder="Enter promo code"
+              placeholder={t('promoCodePlaceholder')}
               className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-purple-500"
               disabled={promoLoading}
               onKeyDown={(e) => {
@@ -168,7 +310,7 @@ export default function SettingsPage() {
               disabled={promoLoading || !promoCode.trim()}
               className="px-6 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-medium hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {promoLoading ? 'Applying...' : 'Apply'}
+              {promoLoading ? t('applying') : t('apply')}
             </button>
           </div>
 

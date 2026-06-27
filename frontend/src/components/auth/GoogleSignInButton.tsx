@@ -3,6 +3,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { signInWithGoogle, type GoogleSignInResult } from "@/lib/google";
 
 type Props = {
@@ -22,6 +23,8 @@ export default function GoogleSignInButton({
 }: Props) {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const t = useTranslations("auth.google");
+  const tLogin = useTranslations("login");
 
   const handleClick = async () => {
     if (loading) return;
@@ -31,23 +34,20 @@ export default function GoogleSignInButton({
       const result = await signInWithGoogle();
 
       if (!result.success) {
-        onError?.(result.error || "Sign in failed");
+        onError?.(result.error || tLogin("errors.generic"));
         return;
       }
 
       onSuccess?.(result);
 
-      // Redirect based on result
       if (result.needsRoleSelection) {
-        // New user or user without role - go to role selection
         router.push("/register/select");
       } else {
-        // Existing user with role - go to home or specified redirect
         router.push(redirectTo);
       }
     } catch (error: any) {
       console.error("[GoogleSignInButton] Error:", error);
-      onError?.(error.message || "Sign in failed");
+      onError?.(error.message || tLogin("errors.generic"));
     } finally {
       setLoading(false);
     }
@@ -92,7 +92,7 @@ export default function GoogleSignInButton({
         />
       </svg>
 
-      {loading ? "Signing in..." : "Continue with Google"}
+      {loading ? t("signingIn") : t("continueWith")}
     </button>
   );
 }

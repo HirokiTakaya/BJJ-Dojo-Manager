@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useTranslations } from "next-intl";
 
 export function Toast({
   message,
@@ -9,6 +10,7 @@ export function Toast({
   message: string;
   onClose: () => void;
 }) {
+  const t = useTranslations("common");
   if (!message) return null;
 
   return (
@@ -37,7 +39,7 @@ export function Toast({
             fontWeight: 700,
           }}
         >
-          Close
+          {t("close")}
         </button>
       </div>
     </div>

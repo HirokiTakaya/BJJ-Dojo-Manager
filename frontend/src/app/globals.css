@@ -1,3 +1,4 @@
+
 @import "tailwindcss";
 
 :root {
@@ -12,11 +13,13 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* This app uses a light design throughout (white cards, dark text).
+   The previous @media (prefers-color-scheme: dark) block flipped the body
+   text to white on OS dark mode, which made input text invisible on the
+   white form fields. Removed so colors stay consistent in all modes. */
+
+html {
+  color-scheme: light;
 }
 
 body {

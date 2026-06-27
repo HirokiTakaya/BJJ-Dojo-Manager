@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useTranslations } from "next-intl";
 import type { AttendanceStatus } from "@/lib/attendance";
 
 export function AttendanceToggleRow({
@@ -12,6 +13,7 @@ export function AttendanceToggleRow({
   onSet: (s: AttendanceStatus) => void;
   disabled?: boolean;
 }) {
+  const t = useTranslations("sessionReservations");
   const btn = (label: string, s: AttendanceStatus) => {
     const active = status === s;
     return (
@@ -36,9 +38,9 @@ export function AttendanceToggleRow({
 
   return (
     <div style={{ display: "flex", gap: 8 }}>
-      {btn("Present", "present")}
-      {btn("Late", "late")}
-      {btn("Absent", "absent")}
+      {btn(t("labelPresent"), "present")}
+      {btn(t("labelLate"), "late")}
+      {btn(t("labelAbsent"), "absent")}
     </div>
   );
 }

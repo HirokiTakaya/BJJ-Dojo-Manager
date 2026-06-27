@@ -3,7 +3,7 @@
  * Firebase Functions / Go Cloud Run バックエンド経由で道場を操作
  */
 
-import { apiGet, apiPost, buildUrl, isUsingGoApi } from "./api-client";
+import { apiGet, apiPost, apiPut, buildUrl, isUsingGoApi } from "./api-client";
 
 // ============================================
 // Types
@@ -114,6 +114,30 @@ export async function approveJoinRequest(
 
   // Functions: POST /approveJoinRequest
   return apiPost<{ status: string }>("/approveJoinRequest", { dojoId, studentUid });
+}
+
+// ============================================
+// Rename dojo (owner only)
+// ============================================
+
+export async function renameDojo(
+  dojoId: string,
+  name: string
+): Promise<DojoWithId> {
+  // The Go backend returns the Dojo object directly ({ name, slug, ... }),
+  // while older Functions paths may return { dojoId, dojo }. Normalize both.
+  const normalize = (res: any): DojoWithId => {
+    const dojo: Dojo = res?.dojo ?? res;
+    return { dojoId: res?.dojoId ?? dojoId, dojo };
+  };
+
+  if (isUsingGoApi()) {
+    const res = await apiPut<any>(`/v1/dojos/${dojoId}/name`, { name });
+    return normalize(res);
+  }
+  // Fallback (Functions) — adjust path if a callable exists
+  const res = await apiPost<any>(`/dojos/${dojoId}/name`, { name });
+  return normalize(res);
 }
 
 // ============================================

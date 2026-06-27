@@ -20,6 +20,7 @@ import (
 	"dojo-manager/backend/internal/domain/session"
 	"dojo-manager/backend/internal/domain/stats"
 	stripedom "dojo-manager/backend/internal/domain/stripe"
+	tuitiondom "dojo-manager/backend/internal/domain/tuition"
 	"dojo-manager/backend/internal/domain/user"
 	"dojo-manager/backend/internal/firebase"
 	apihttp "dojo-manager/backend/internal/http"
@@ -78,6 +79,16 @@ func main() {
 		log.Println("STRIPE_SECRET_KEY not set, Stripe features disabled")
 	}
 
+	// Tuition service (member -> dojo payments via Stripe Connect)
+	var tuitionSvc *tuitiondom.Service
+	tuitionCfg := tuitiondom.LoadConfig()
+	if tuitionCfg.SecretKey != "" && tuitionCfg.ConnectWebhookSecret != "" {
+		tuitionSvc = tuitiondom.NewService(fs.Client, tuitionCfg)
+		log.Println("Tuition (Connect) service initialized")
+	} else {
+		log.Println("STRIPE_CONNECT_WEBHOOK_SECRET not set, tuition features disabled")
+	}
+
 	router := apihttp.NewRouter(apihttp.RouterDeps{
 		Cfg:              cfg,
 		AuthClient:       authClient,
@@ -93,6 +104,7 @@ func main() {
 		MembersSvc:       membersSvc,
 		ProfileSvc:       profileSvc,
 		StripeSvc:        stripeSvc,
+		TuitionSvc:       tuitionSvc,
 		RetentionSvc:     retentionSvc,
 	})
 

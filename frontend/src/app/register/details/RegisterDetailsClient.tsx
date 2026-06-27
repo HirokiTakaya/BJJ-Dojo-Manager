@@ -2,14 +2,11 @@
 
 import React, { Suspense, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-// ✅ FIX: authNullable を使う（auth は Firebase未初期化時にクラッシュする）
+import { useTranslations } from "next-intl";
 import { authNullable, dbNullable } from "@/firebase";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
-// ─────────────────────────────────────────────────────────────
-// Sub-components (統一デザイン)
-// ─────────────────────────────────────────────────────────────
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
   <div className={`rounded-3xl border border-slate-200 bg-white shadow-sm ${className}`}>{children}</div>
 );
@@ -92,9 +89,6 @@ const GhostBtn = ({
   </button>
 );
 
-// ─────────────────────────────────────────────────────────────
-// Main Component
-// ─────────────────────────────────────────────────────────────
 export default function RegisterDetailsPage() {
   return (
     <Suspense
@@ -112,6 +106,8 @@ export default function RegisterDetailsPage() {
 function RegisterDetailsInner() {
   const router = useRouter();
   const sp = useSearchParams();
+  const t = useTranslations("register.details");
+  const tCommon = useTranslations("common");
 
   const roleUi = (sp.get("role") || "").toLowerCase();
   const role = useMemo(() => {
@@ -142,19 +138,18 @@ function RegisterDetailsInner() {
     setSuccess("");
 
     if (!role) {
-      setError("Role is missing. Please go back and select your account type.");
+      setError(t("errors.roleMissing"));
       return;
     }
     if (!name.trim() || !email.trim() || !password || password !== confirmPassword) {
-      setError("Please fill all fields and match passwords.");
+      setError(t("errors.fillAllFields"));
       return;
     }
 
     setLoading(true);
     try {
-      // ✅ FIX: authNullable / dbNullable を使い、null チェック
-      if (!authNullable) throw new Error("Auth is not ready. Please refresh the page.");
-      if (!dbNullable) throw new Error("Database is not ready. Please refresh the page.");
+      if (!authNullable) throw new Error(t("errors.authNotReady"));
+      if (!dbNullable) throw new Error(t("errors.dbNotReady"));
 
       const normalizedEmail = email.trim().toLowerCase();
       const displayName = name.trim();
@@ -162,7 +157,6 @@ function RegisterDetailsInner() {
 
       const cred = await createUserWithEmailAndPassword(authNullable, normalizedEmail, password);
 
-      // UIをブロックしないため先に遷移
       goVerify();
 
       const tasks: Promise<any>[] = [];
@@ -179,15 +173,12 @@ function RegisterDetailsInner() {
             role,
             roles: rolesMap,
             roleUi,
-
             email: cred.user.email ?? normalizedEmail,
             emailLower: normalizedEmail,
             emailIndex: normalizedEmail,
-
             displayName,
             displayNameLower,
             nameIndex: displayNameLower,
-
             onboardingComplete: false,
             createdAt: serverTimestamp(),
           },
@@ -195,109 +186,101 @@ function RegisterDetailsInner() {
         ).catch(() => undefined)
       );
 
-      // メール認証は /verify で sendSignInLinkToEmail() が送信するため不要
-
-      // ✅ FIX: await を追加（元は await なしで fire-and-forget だった）
       await Promise.allSettled(tasks);
     } catch (err: any) {
-      if (err?.code === "auth/email-already-in-use") setError("This email is already registered.");
-      else if (err?.code === "auth/weak-password") setError("Password must be at least 6 characters.");
-      else setError(err?.message || "Signup failed.");
+      if (err?.code === "auth/email-already-in-use") setError(t("errors.emailInUse"));
+      else if (err?.code === "auth/weak-password") setError(t("errors.weakPassword"));
+      else setError(err?.message || t("errors.signupFailed"));
       setLoading(false);
     }
   };
 
   const canSubmit = !!role && !!name.trim() && !!email.trim() && !!password && password === confirmPassword;
 
-  const roleLabel = roleUi === "staff" ? "Staff" : roleUi === "student" ? "Student" : "Unknown";
+  const roleLabel = roleUi === "staff" ? t("staffAccount") : roleUi === "student" ? t("studentAccount") : t("unknownAccount");
   const roleColor = roleUi === "staff" ? "bg-violet-100 text-violet-700" : "bg-emerald-100 text-emerald-700";
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
       <div className="mx-auto max-w-md p-4 sm:p-6 space-y-4 pt-8 sm:pt-12">
-        {/* Logo & Header */}
         <div className="text-center mb-6">
           <img
             src="/assets/jiujitsu-samurai-Logo.png"
-            alt="Logo"
+            alt={tCommon("appName")}
             className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-lg"
           />
-          <h1 className="text-2xl font-bold text-slate-900">Create Your Account</h1>
-          <p className="mt-2 text-sm text-slate-500">Sign up to get started</p>
+          <h1 className="text-2xl font-bold text-slate-900">{t("createTitle")}</h1>
+          <p className="mt-2 text-sm text-slate-500">{t("createSubtitle")}</p>
         </div>
 
-        {/* Role Badge */}
         <div className="flex justify-center">
           <span className={`inline-flex items-center rounded-full px-4 py-1.5 text-sm font-semibold ${roleColor}`}>
-            {roleLabel} Account
+            {roleLabel}
           </span>
         </div>
 
-        {/* Alerts */}
         {error && <Alert kind="error">❌ {error}</Alert>}
         {success && <Alert kind="success">✅ {success}</Alert>}
 
-        {/* Form Card */}
         <Card>
           <div className="px-5 py-6 sm:px-6 sm:py-8 space-y-4">
             <Input
-              label="Name"
-              placeholder="Enter your full name"
+              label={t("nameLabel")}
+              placeholder={t("namePlaceholderLong")}
               value={name}
               onChange={setName}
               autoComplete="name"
             />
 
             <Input
-              label="Email"
+              label={t("emailLabel")}
               type="email"
-              placeholder="Enter your email"
+              placeholder={t("emailPlaceholderLong")}
               value={email}
               onChange={setEmail}
               autoComplete="email"
             />
 
             <Input
-              label="Password"
+              label={t("passwordLabel")}
               type="password"
-              placeholder="At least 6 characters"
+              placeholder={t("passwordPlaceholderLong")}
               value={password}
               onChange={setPassword}
               autoComplete="new-password"
-              error={password && password.length < 6 ? "Password must be at least 6 characters" : undefined}
+              error={password && password.length < 6 ? t("passwordTooShortHint") : undefined}
             />
 
             <Input
-              label="Confirm Password"
+              label={t("confirmPasswordLabel")}
               type="password"
-              placeholder="Re-enter your password"
+              placeholder={t("confirmPasswordPlaceholderLong")}
               value={confirmPassword}
               onChange={setConfirmPassword}
               autoComplete="new-password"
-              error={confirmPassword && password !== confirmPassword ? "Passwords do not match" : undefined}
+              error={confirmPassword && password !== confirmPassword ? t("passwordsMismatch") : undefined}
             />
 
             <div className="pt-2">
               <PrimaryBtn onClick={handleSignUp} disabled={loading || !canSubmit}>
-                {loading ? "Creating account…" : "Sign Up & Verify Email"}
+                {loading ? t("creatingAccount") : t("submit")}
               </PrimaryBtn>
             </div>
-          </div
+          </div>
         </Card>
 
-        {/* Footer Links */}
         <div className="text-center space-y-3">
           <p className="text-sm text-slate-500">
-            Already have an account?{" "}
+            {t("alreadyHaveAccount")}{" "}
             <button
               onClick={() => router.push("/login")}
               className="font-semibold text-slate-900 hover:underline"
             >
-              Log in
+              {t("logIn")}
             </button>
           </p>
 
-          <GhostBtn onClick={() => router.back()}>← Back</GhostBtn>
+          <GhostBtn onClick={() => router.back()}>{t("back")}</GhostBtn>
         </div>
       </div>
     </div>
