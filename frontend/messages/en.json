@@ -489,7 +489,8 @@
     "signOut": "Sign Out",
     "menu": "Menu",
     "openMenu": "Open menu",
-    "closeMenu": "Close menu"
+    "closeMenu": "Close menu",
+    "billing": "Billing"
   },
   "tuition": {
     "status": {
@@ -1441,7 +1442,9 @@
     "dojoNamePlaceholder": "Enter dojo name",
     "renameSuccess": "Dojo name updated",
     "renameFailed": "Failed to update dojo name",
-    "renameForbidden": "Only the owner can rename the dojo"
+    "renameForbidden": "Only the owner can rename the dojo",
+    "waiverManage": "Waivers",
+    "waiverManageDesc": "Review signed liability waivers from members and visitors"
   },
   "billing": {
     "title": "Billing & Plans",

@@ -489,7 +489,8 @@
     "signOut": "ログアウト",
     "menu": "メニュー",
     "openMenu": "メニューを開く",
-    "closeMenu": "メニューを閉じる"
+    "closeMenu": "メニューを閉じる",
+    "billing": "請求"
   },
   "tuition": {
     "status": {
@@ -1441,7 +1442,9 @@
     "dojoNamePlaceholder": "道場名を入力",
     "renameSuccess": "道場名を変更しました",
     "renameFailed": "道場名の変更に失敗しました",
-    "renameForbidden": "道場名を変更できるのはオーナーのみです"
+    "renameForbidden": "道場名を変更できるのはオーナーのみです",
+    "waiverManage": "免責同意書 (Waiver)",
+    "waiverManageDesc": "会員・ビジター署名済みの免責同意書の確認"
   },
   "billing": {
     "title": "請求とプラン",

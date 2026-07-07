@@ -67,7 +67,7 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
   // Billing first so the mobile center label shows "Billing" on /settings/billing
   {
     id: "billing",
-    labelKey: "settings",
+    labelKey: "billing",
     icon: "💳",
     href: (dojoId) => `/dojos/${dojoId}/settings/billing`,
     staffOnly: true,

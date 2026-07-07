@@ -1,13 +1,13 @@
 "use client";
 
-import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import { authNullable, dbNullable, firebaseEnabled, firebaseDisabledReason } from "@/firebase";
 import {
   createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile,
-  fetchSignInMethodsForEmail, signOut, GoogleAuthProvider, signInWithRedirect, getRedirectResult, type UserCredential,
+  fetchSignInMethodsForEmail, signOut, GoogleAuthProvider, signInWithPopup,
 } from "firebase/auth";
 import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import { FirebaseError } from "firebase/app";
@@ -53,17 +53,6 @@ const GoogleBtn = ({ onClick, disabled, label }: { onClick: ()=>void; disabled?:
     {label}
   </button>
 );
-
-// Google redirect draft
-const STUDENT_DRAFT_KEY = "student_google_signup_draft_v1";
-const STUDENT_FLOW_KEY = "student_google_flow_v1";
-type StudentDraft = { next: string; fullName: string; phone: string; belt: Belt; dojoId: string; dojoName: string; };
-function saveDraft(d: StudentDraft) { sessionStorage.setItem(STUDENT_DRAFT_KEY, JSON.stringify(d)); }
-function loadDraft(): StudentDraft | null { try { return JSON.parse(sessionStorage.getItem(STUDENT_DRAFT_KEY)??"null"); } catch { return null; } }
-function clearDraft() { sessionStorage.removeItem(STUDENT_DRAFT_KEY); }
-function setFlow(f: "register"|"login") { sessionStorage.setItem(STUDENT_FLOW_KEY, f); }
-function getFlow(): "register"|"login"|null { const v=sessionStorage.getItem(STUDENT_FLOW_KEY); return v==="register"||v==="login"?v:null; }
-function clearFlow() { sessionStorage.removeItem(STUDENT_FLOW_KEY); }
 
 // ─────────────────────────────────────────────
 // Main
@@ -234,95 +223,86 @@ function StudentSignupInner() {
     } catch (e) { setError(formatAuthError(e)); } finally { setBusy(false); }
   };
 
+  // Google sign-up via popup. Popup keeps us on this page, so the form values
+  // stay in memory and we write users/{uid} immediately — no sessionStorage
+  // draft that could be lost across a redirect round-trip (which was bouncing
+  // users back to the signup screen).
   const startGoogleRegisterRedirect = async () => {
     if (busy || authMode!=="register" || !canGoogleRegister) return;
     setBusy(true); setError(""); setSuccess("");
     try {
-      if (!firebaseEnabled || !authNullable) throw new Error(t("errors.firebaseNotReady"));
+      if (!firebaseEnabled || !authNullable || !dbNullable) throw new Error(t("errors.firebaseNotReady"));
       if (!form.dojoId) throw new Error(t("errors.gymRequired"));
-      setFlow("register");
-      saveDraft({ next, fullName: form.fullName.trim(), phone: form.phone.trim(), belt: form.belt, dojoId: form.dojoId, dojoName: form.dojoName.trim() });
+
       const provider = new GoogleAuthProvider(); provider.setCustomParameters({ prompt: "select_account" });
-      await signInWithRedirect(authNullable, provider);
-    } catch (e) { setError(formatGoogleAuthError(e)); setBusy(false); }
+      const cred = await signInWithPopup(authNullable, provider);
+
+      const uid = cred.user.uid;
+      const email = (cred.user.email??"").trim().toLowerCase();
+      if (!email) throw new Error(t("errors.googleEmailMissing"));
+      const fullName = (form.fullName.trim() || cred.user.displayName || "").trim();
+      if (fullName) await updateProfile(cred.user, { displayName: fullName }).catch(() => {});
+
+      const userRef = doc(dbNullable, "users", uid);
+      const existing = await getDoc(userRef);
+      if (existing.exists()) { const role = existing.data()?.role; if (role && role !== "student") throw new Error(t("errors.googleAccountConflict")); }
+
+      const pendingDojoAction: PendingDojoAction = {
+        type: "student_join_dojo",
+        dojoId: form.dojoId,
+        dojoName: form.dojoName.trim(),
+      };
+
+      await setDoc(userRef, {
+        uid, email, emailLower: email,
+        displayName: fullName || cred.user.displayName || null,
+        displayNameLower: (fullName || cred.user.displayName || "").toLowerCase() || null,
+        role: "student", roles: ["student"], accountType: "student", roleUi: "student",
+        studentProfile: {
+          fullName: fullName || cred.user.displayName || "", email,
+          phone: form.phone.trim() || null, belt: form.belt,
+          dojoName: form.dojoName.trim() || null, dojoId: form.dojoId ?? null,
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+        },
+        onboardingComplete: false, emailVerified: !!cred.user.emailVerified,
+        pendingDojoAction,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp(), lastLoginAt: serverTimestamp(),
+      }, { merge: true });
+
+      setSuccess(t("successCreatedJoin"));
+      setTimeout(() => navigateAfterAuth(cred.user, router, next), 800);
+    } catch (e) {
+      console.error("[Student][Google]", e); setError(formatGoogleAuthError(e));
+      try { if (authNullable) await signOut(authNullable); } catch {}
+    } finally { setBusy(false); }
   };
 
   const startGoogleLoginRedirect = async () => {
     if (busy) return;
     setBusy(true); setError(""); setSuccess("");
     try {
-      if (!authNullable) throw new Error(t("errors.authNotReady"));
-      setFlow("login");
+      if (!authNullable || !dbNullable) throw new Error(t("errors.authNotReady"));
       const provider = new GoogleAuthProvider(); provider.setCustomParameters({ prompt: "select_account" });
-      await signInWithRedirect(authNullable, provider);
-    } catch (e) { setError(formatGoogleAuthError(e)); setBusy(false); }
+      const cred = await signInWithPopup(authNullable, provider);
+
+      const email = (cred.user.email??"").trim().toLowerCase();
+      if (!email) throw new Error(t("errors.googleEmailMissing"));
+
+      const userRef = doc(dbNullable, "users", cred.user.uid);
+      const snap = await getDoc(userRef);
+      if (!snap.exists()) throw new Error(t("errors.noProfileFound"));
+      const role = snap.data()?.role;
+      if (role && role !== "student") throw new Error(t("errors.notStudentAccount"));
+      await setDoc(userRef, { lastLoginAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
+      setSuccess(t("successLogin"));
+      navigateAfterAuth(cred.user, router, next);
+    } catch (e) {
+      console.error("[Student][Google]", e); setError(formatGoogleAuthError(e));
+      try { if (authNullable) await signOut(authNullable); } catch {}
+    } finally { setBusy(false); }
   };
 
-  // Google redirect result handler
-  const redirectHandledRef = useRef(false);
-  useEffect(() => {
-    if (redirectHandledRef.current) return; redirectHandledRef.current = true;
-    const run = async () => {
-      try {
-        if (!authNullable || !dbNullable) return;
-        const cred: UserCredential | null = await getRedirectResult(authNullable); if (!cred) return;
-        const flow = getFlow(); clearFlow();
-        const uid = cred.user.uid;
-        const email = (cred.user.email??"").trim().toLowerCase();
-        if (!email) throw new Error(t("errors.googleEmailMissing"));
-        setBusy(true); setError(""); setSuccess("");
-        const userRef = doc(dbNullable, "users", uid);
-
-        if (flow === "register") {
-          const draft = loadDraft(); clearDraft();
-          if (!draft) { setError(t("errors.signupDataMissing")); try { await signOut(authNullable); } catch {} return; }
-          const fullName = (draft.fullName || cred.user.displayName || "").trim();
-          if (fullName) await updateProfile(cred.user, { displayName: fullName }).catch(() => {});
-          const existing = await getDoc(userRef);
-          if (existing.exists()) { const role = existing.data()?.role; if (role && role !== "student") throw new Error(t("errors.googleAccountConflict")); }
-
-          const pendingDojoAction: PendingDojoAction = {
-            type: "student_join_dojo",
-            dojoId: draft.dojoId,
-            dojoName: draft.dojoName,
-          };
-
-          await setDoc(userRef, {
-            uid, email, emailLower: email,
-            displayName: fullName || cred.user.displayName || null,
-            displayNameLower: (fullName || cred.user.displayName || "").toLowerCase() || null,
-            role: "student", roles: ["student"], accountType: "student", roleUi: "student",
-            studentProfile: {
-              fullName: fullName || cred.user.displayName || "", email,
-              phone: draft.phone || null, belt: draft.belt,
-              dojoName: draft.dojoName || null, dojoId: draft.dojoId ?? null,
-              createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
-            },
-            onboardingComplete: false, emailVerified: !!cred.user.emailVerified,
-            pendingDojoAction,
-            createdAt: serverTimestamp(), updatedAt: serverTimestamp(), lastLoginAt: serverTimestamp(),
-          }, { merge: true });
-
-          setSuccess(t("successCreatedJoin"));
-          setTimeout(() => navigateAfterAuth(cred.user, router, next), 800);
-          return;
-        }
-
-        // Login flow
-        const snap = await getDoc(userRef);
-        if (!snap.exists()) throw new Error(t("errors.noProfileFound"));
-        const role = snap.data()?.role;
-        if (role && role !== "student") throw new Error(t("errors.notStudentAccount"));
-        await setDoc(userRef, { lastLoginAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
-        setSuccess(t("successLogin"));
-        navigateAfterAuth(cred.user, router, next);
-      } catch (e) {
-        console.error("[Student][Google]", e); setError(formatGoogleAuthError(e));
-        try { if (authNullable) await signOut(authNullable); } catch {}
-      } finally { setBusy(false); }
-    };
-    run();
-  }, [router, next, t]);
+  // (Google now uses signInWithPopup above — no redirect handler needed)
 
   const handleKeyPress = (e: React.KeyboardEvent) => { if (e.key==="Enter" && !busy && authMethod==="email") authMode==="register"?handleRegister():handleLogin(); };
 

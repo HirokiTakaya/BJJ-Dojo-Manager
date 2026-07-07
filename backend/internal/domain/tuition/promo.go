@@ -9,6 +9,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/stripe/stripe-go/v76"
+	"github.com/stripe/stripe-go/v76/account"
 	"github.com/stripe/stripe-go/v76/coupon"
 	"github.com/stripe/stripe-go/v76/promotioncode"
 	"google.golang.org/api/iterator"
@@ -50,12 +51,21 @@ func (s *Service) CreateTuitionPromo(ctx context.Context, userUID string, in Cre
 		return nil, err
 	}
 	if status, _ := dojoData["stripeAccountStatus"].(string); status != "active" {
-		return nil, fmt.Errorf("%w: this dojo has not finished payment setup", ErrNotReady)
+		// Double-check live state — the account.updated webhook may not have
+		// synced Firestore yet right after onboarding completes.
+		acct, aerr := account.GetByID(acctID, nil)
+		if aerr != nil || !acct.ChargesEnabled {
+			return nil, fmt.Errorf("%w: this dojo has not finished payment setup", ErrNotReady)
+		}
 	}
 
-	// Currency must match the dojo's tuition plans. We read it from the most
-	// recent plan; default to CAD if none exist yet.
-	currency := s.dojoPlanCurrency(ctx, in.DojoID)
+	// Currency must match the dojo's tuition plans. Creating a coupon before
+	// any plan exists would lock in a possibly-wrong currency (a CAD coupon
+	// can never apply to a JPY plan), so we require a plan first.
+	currency, ok := s.dojoPlanCurrency(ctx, in.DojoID)
+	if !ok {
+		return nil, fmt.Errorf("%w: create a tuition plan first — the discount currency follows your plans", ErrBadRequest)
+	}
 
 	maxRedemptions := in.MaxRedemptions
 	if maxRedemptions <= 0 {
@@ -213,9 +223,12 @@ func (s *Service) DeactivateTuitionPromo(ctx context.Context, userUID, dojoID, p
 	return nil
 }
 
-// dojoPlanCurrency returns the currency used by the dojo's tuition plans,
-// defaulting to "cad" when none exist. Coupons must match plan currency.
-func (s *Service) dojoPlanCurrency(ctx context.Context, dojoID string) string {
+// dojoPlanCurrency returns the currency used by the dojo's tuition plans.
+// Active plans take priority; an inactive plan's currency is used as a
+// fallback. Returns ok=false when the dojo has no plans at all, so callers
+// can refuse to create a coupon whose currency might not match future plans.
+func (s *Service) dojoPlanCurrency(ctx context.Context, dojoID string) (string, bool) {
+	fallback := ""
 	iter := s.fs.Collection("dojos").Doc(dojoID).Collection("tuitionPlans").Documents(ctx)
 	defer iter.Stop()
 	for {
@@ -223,11 +236,22 @@ func (s *Service) dojoPlanCurrency(ctx context.Context, dojoID string) string {
 		if err != nil {
 			break
 		}
-		if cur := asString(doc.Data()["currency"]); cur != "" {
-			return strings.ToLower(cur)
+		d := doc.Data()
+		cur := asString(d["currency"])
+		if cur == "" {
+			continue
+		}
+		if active := asBool(d["isActive"]); active {
+			return strings.ToLower(cur), true
+		}
+		if fallback == "" {
+			fallback = strings.ToLower(cur)
 		}
 	}
-	return "cad"
+	if fallback != "" {
+		return fallback, true
+	}
+	return "", false
 }
 
 // ---- small Firestore value helpers ----
