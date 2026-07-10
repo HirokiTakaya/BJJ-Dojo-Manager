@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import { auth, db as dbNullable } from "@/firebase";
+import { getCachedUserDoc } from "@/lib/user-doc-cache";
 import {
   doc,
   getDoc,
@@ -978,7 +979,7 @@ export default function TimetableClient() {
       try {
         const db = await waitForDb();
         if (!db || cancelled) return;
-        const snap = await getDoc(doc(db, "users", user.uid));
+        const snap = await getCachedUserDoc(user.uid);
         const ud = snap.exists() ? (snap.data() as UserDoc) : null;
         const did = resolveDojoId(ud);
 

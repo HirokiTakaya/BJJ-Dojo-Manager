@@ -13,6 +13,7 @@ import {
 
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { getCachedUserDoc } from "@/lib/user-doc-cache";
 
 type DojoInfo = {
   id: string;
@@ -59,7 +60,7 @@ function VisitorSelectDojoContent() {
         try {
           const db = dbNullable;
           if (db) {
-            const userSnap = await getDoc(doc(db, "users", user.uid));
+            const userSnap = await getCachedUserDoc(user.uid);
             if (userSnap.exists()) {
               const ud = userSnap.data() as any;
               const dojoId =

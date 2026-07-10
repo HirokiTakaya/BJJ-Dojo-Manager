@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -6,6 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import { db } from "@/firebase";
+import { getCachedUserDoc } from "@/lib/user-doc-cache";
 import { useDojoName } from "@/hooks/useDojoName";
 import { resolveIsStaff, type UserDocBase } from "@/lib/roles";
 import Navigation, { BottomNavigation } from "@/components/Navigation";
@@ -188,7 +188,7 @@ export default function AttendanceDashboard() {
     const load = async () => {
       try {
         // User doc
-        const userSnap = await getDoc(doc(db, "users", user.uid));
+        const userSnap = await getCachedUserDoc(user.uid);
         if (!cancelled && userSnap.exists()) setUserDoc(userSnap.data() as UserDocBase);
 
         // Check staff

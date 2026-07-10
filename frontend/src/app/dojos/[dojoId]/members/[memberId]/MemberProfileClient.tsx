@@ -5,6 +5,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import { db } from "@/firebase";
+import { getCachedUserDoc } from "@/lib/user-doc-cache";
 import { useDojoName } from "@/hooks/useDojoName";
 import { resolveIsStaff, type UserDocBase } from "@/lib/roles";
 import Navigation, { BottomNavigation } from "@/components/Navigation";
@@ -403,7 +404,7 @@ export default function MemberProfileClient(props: { dojoId?: string; memberId?:
       try {
         // ✅ Parallel: load user doc, member doc, user doc (for merge), rank history
         const [userSnap, memberSnap, memberUserSnap, rankSnap] = await Promise.all([
-          getDoc(doc(db, "users", user.uid)),
+          getCachedUserDoc(user.uid),
           getDoc(doc(db, "dojos", dojoId, "members", memberId)),
           getDoc(doc(db, "users", memberId)),
           getDocs(query(

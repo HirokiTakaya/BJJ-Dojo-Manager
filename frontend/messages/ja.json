@@ -475,7 +475,25 @@
       "loadFailed": "プロフィールの読み込みに失敗しました。",
       "saveFailed": "保存に失敗しました。",
       "uploadFailed": "写真をアップロードできませんでした。"
-    }
+    },
+    "passwordSection": "パスワード変更",
+    "currentPasswordLabel": "現在のパスワード",
+    "newPasswordLabel": "新しいパスワード",
+    "confirmNewPasswordLabel": "新しいパスワード(確認)",
+    "changingPassword": "変更中...",
+    "passwordChanged": "パスワードを変更しました",
+    "googleNoPassword": "Googleアカウントでログインしているため、パスワードはありません。パスワードの管理はGoogleアカウント側で行われます。",
+    "pwCurrentRequired": "現在のパスワードを入力してください",
+    "pwTooShort": "新しいパスワードは6文字以上にしてください",
+    "pwMismatch": "新しいパスワードが一致しません",
+    "pwWrongCurrent": "現在のパスワードが正しくありません",
+    "pwTooMany": "試行回数が多すぎます。しばらくしてからもう一度お試しください",
+    "pwFailed": "パスワードの変更に失敗しました",
+    "changePhoto": "写真を変更",
+    "photoUpdated": "プロフィール写真を更新しました",
+    "photoInvalidType": "画像ファイルを選択してください",
+    "photoTooLarge": "画像は10MB以下にしてください",
+    "photoUploadFailed": "写真のアップロードに失敗しました"
   },
   "navigation": {
     "home": "ホーム",

@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useState, useCallback, useMemo } from "react";
+import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { auth } from "@/firebase";
+import { invalidateUserDoc } from "@/lib/user-doc-cache";
 import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 
 // NavItem now uses a translation key instead of a hardcoded label.
@@ -160,18 +162,8 @@ export default function Navigation({
     [getHref, pathname]
   );
 
-  const handleNav = useCallback(
-    (item: NavItem) => {
-      const href = getHref(item);
-      if (href) {
-        router.push(href);
-        setMobileMenuOpen(false);
-      }
-    },
-    [getHref, router]
-  );
-
   const handleSignOut = useCallback(async () => {
+    invalidateUserDoc(); // clear cached user docs so the next login starts fresh
     await auth.signOut();
     router.replace("/login");
   }, [router]);
@@ -199,23 +191,34 @@ export default function Navigation({
                 const active = isActive(item);
                 const disabled = !href;
 
+                // <Link> lets Next.js prefetch the route while the link is
+                // visible, so the page is already loaded when tapped.
+                if (disabled) {
+                  return (
+                    <button
+                      key={item.id}
+                      disabled
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all text-slate-400 cursor-not-allowed"
+                    >
+                      <span className="text-base">{item.icon}</span>
+                      <span>{getLabel(item)}</span>
+                    </button>
+                  );
+                }
                 return (
-                  <button
+                  <Link
                     key={item.id}
-                    onClick={() => handleNav(item)}
-                    disabled={disabled}
+                    href={href!}
                     className={[
                       "flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all",
                       active
                         ? "bg-slate-900 text-white"
-                        : disabled
-                        ? "text-slate-400 cursor-not-allowed"
                         : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
                     ].join(" ")}
                   >
                     <span className="text-base">{item.icon}</span>
                     <span>{getLabel(item)}</span>
-                  </button>
+                  </Link>
                 );
               })}
             </div>
@@ -296,23 +299,33 @@ export default function Navigation({
                 const active = isActive(item);
                 const disabled = !href;
 
+                if (disabled) {
+                  return (
+                    <button
+                      key={item.id}
+                      disabled
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all text-slate-400 cursor-not-allowed"
+                    >
+                      <span className="text-xl">{item.icon}</span>
+                      <span className="font-medium">{getLabel(item)}</span>
+                    </button>
+                  );
+                }
                 return (
-                  <button
+                  <Link
                     key={item.id}
-                    onClick={() => handleNav(item)}
-                    disabled={disabled}
+                    href={href!}
+                    onClick={() => setMobileMenuOpen(false)}
                     className={[
                       "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all",
                       active
                         ? "bg-slate-900 text-white"
-                        : disabled
-                        ? "text-slate-400 cursor-not-allowed"
                         : "text-slate-700 hover:bg-slate-100",
                     ].join(" ")}
                   >
                     <span className="text-xl">{item.icon}</span>
                     <span className="font-medium">{getLabel(item)}</span>
-                  </button>
+                  </Link>
                 );
               })}
 
@@ -401,25 +414,32 @@ export function BottomNavigation({
           const active = pathname === item.href || (item.href && pathname?.startsWith(item.href));
           const disabled = !item.href;
 
+          if (!item.href) {
+            return (
+              <button
+                key={item.id}
+                disabled
+                className="flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-all text-slate-300"
+              >
+                <span className="text-xl">{item.icon}</span>
+                <span className="text-[10px] font-medium">{item.label}</span>
+              </button>
+            );
+          }
           return (
-            <button
+            <Link
               key={item.id}
-              onClick={() => item.href && router.push(item.href)}
-              disabled={disabled}
+              href={item.href}
               className={[
                 "flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-all",
-                active
-                  ? "text-slate-900"
-                  : disabled
-                  ? "text-slate-300"
-                  : "text-slate-500",
+                active ? "text-slate-900" : "text-slate-500",
               ].join(" ")}
             >
               <span className={["text-xl", active ? "scale-110" : ""].join(" ")}>{item.icon}</span>
               <span className={["text-[10px] font-medium", active ? "font-semibold" : ""].join(" ")}>
                 {item.label}
               </span>
-            </button>
+            </Link>
           );
         })}
       </div>

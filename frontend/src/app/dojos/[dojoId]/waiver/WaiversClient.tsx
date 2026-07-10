@@ -7,6 +7,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import Navigation, { BottomNavigation } from "@/components/Navigation";
 import { useDojoName } from "@/hooks/useDojoName";
 import { dbNullable } from "@/firebase";
+import { getCachedUserDoc } from "@/lib/user-doc-cache";
 import { resolveIsStaff, type UserDocBase } from "@/lib/roles";
 import {
   doc,
@@ -214,7 +215,7 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
         if (!db) throw new Error("Firestore not initialized");
 
         // Load user doc to check staff BEFORE fetching any waiver data.
-        const userSnap = await getDoc(doc(db, "users", user.uid));
+        const userSnap = await getCachedUserDoc(user.uid);
         const uData = userSnap.exists() ? (userSnap.data() as UserDocBase) : null;
         if (!cancelled && uData) {
           setUserDoc(uData);
@@ -447,22 +448,25 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
           <div className="flex gap-1">
             <button
               onClick={() => setFilter("new")}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${filter === "new" ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-700"
-                }`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                filter === "new" ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-700"
+              }`}
             >
               {t("filterPending", { count: counts.newCount })}
             </button>
             <button
               onClick={() => setFilter("reviewed")}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${filter === "reviewed" ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-700"
-                }`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                filter === "reviewed" ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-700"
+              }`}
             >
               {t("filterReviewed", { count: counts.reviewedCount })}
             </button>
             <button
               onClick={() => setFilter("all")}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${filter === "all" ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-700"
-                }`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                filter === "all" ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-700"
+              }`}
             >
               {t("filterAll", { count: counts.total })}
             </button>
@@ -471,22 +475,25 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
           <div className="flex gap-1 ml-auto">
             <button
               onClick={() => setSignerFilter("all")}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${signerFilter === "all" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-700"
-                }`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                signerFilter === "all" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-700"
+              }`}
             >
               {t("filterAllSimple")}
             </button>
             <button
               onClick={() => setSignerFilter("member")}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${signerFilter === "member" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-700"
-                }`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                signerFilter === "member" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-700"
+              }`}
             >
               {t("filterMembers")}
             </button>
             <button
               onClick={() => setSignerFilter("visitor")}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${signerFilter === "visitor" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-700"
-                }`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                signerFilter === "visitor" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-700"
+              }`}
             >
               {t("filterVisitors")}
             </button>
@@ -510,8 +517,9 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <p className="font-semibold text-gray-900">{w.name}</p>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${w.signerType === "member" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
-                        }`}>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        w.signerType === "member" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                      }`}>
                         {w.signerType === "member" ? t("labelMember") : t("labelVisitor")}
                       </span>
                       {w.isMinor && (
@@ -519,14 +527,15 @@ export default function WaiversClient(props: { dojoId?: string } = {}) {
                           {t("labelMinor")}
                         </span>
                       )}
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${w.status === "new" ? "bg-blue-100 text-blue-700" :
-                          w.status === "reviewed" ? "bg-green-100 text-green-700" :
-                            w.status === "signed" ? "bg-green-100 text-green-700" :
-                              "bg-gray-100 text-gray-600"
-                        }`}>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        w.status === "new" ? "bg-blue-100 text-blue-700" :
+                        w.status === "reviewed" ? "bg-green-100 text-green-700" :
+                        w.status === "signed" ? "bg-green-100 text-green-700" :
+                        "bg-gray-100 text-gray-600"
+                      }`}>
                         {w.status === "new" ? t("statusPendingReview") :
-                          w.status === "reviewed" ? t("statusReviewed") :
-                            w.status === "signed" ? t("statusSigned") : w.status}
+                         w.status === "reviewed" ? t("statusReviewed") :
+                         w.status === "signed" ? t("statusSigned") : w.status}
                       </span>
                     </div>
                     <p className="text-sm text-gray-500">

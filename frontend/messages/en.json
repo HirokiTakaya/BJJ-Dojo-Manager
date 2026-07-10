@@ -475,7 +475,25 @@
       "loadFailed": "Failed to load profile.",
       "saveFailed": "Failed to save.",
       "uploadFailed": "Could not upload photo."
-    }
+    },
+    "passwordSection": "Change Password",
+    "currentPasswordLabel": "Current password",
+    "newPasswordLabel": "New password",
+    "confirmNewPasswordLabel": "Confirm new password",
+    "changingPassword": "Changing...",
+    "passwordChanged": "Password changed",
+    "googleNoPassword": "You signed in with Google, so there is no password for this account. Your password is managed by your Google account.",
+    "pwCurrentRequired": "Enter your current password",
+    "pwTooShort": "New password must be at least 6 characters",
+    "pwMismatch": "New passwords do not match",
+    "pwWrongCurrent": "Current password is incorrect",
+    "pwTooMany": "Too many attempts. Please try again later",
+    "pwFailed": "Failed to change password",
+    "changePhoto": "Change photo",
+    "photoUpdated": "Profile photo updated",
+    "photoInvalidType": "Please choose an image file",
+    "photoTooLarge": "Image must be under 10MB",
+    "photoUploadFailed": "Failed to upload photo"
   },
   "navigation": {
     "home": "Home",

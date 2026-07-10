@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import { db } from "@/firebase";
+import { getCachedUserDoc } from "@/lib/user-doc-cache";
 import { doc, getDoc } from "firebase/firestore";
 import { resolveDojoId, resolveIsStaff } from "@/lib/roles";
 import { useDojoName } from "@/hooks/useDojoName";
@@ -127,7 +128,7 @@ export default function RetentionAlertsClient() {
     (async () => {
       setProfileLoading(true);
       try {
-        const snap = await getDoc(doc(db, "users", user.uid));
+        const snap = await getCachedUserDoc(user.uid);
         const ud = snap.exists() ? snap.data() : null;
         if (!cancelled) { setUserDoc(ud); setDojoId(params?.dojoId || resolveDojoId(ud)); }
       } catch (e: any) { if (!cancelled) setError(e?.message || "Failed to load profile."); }

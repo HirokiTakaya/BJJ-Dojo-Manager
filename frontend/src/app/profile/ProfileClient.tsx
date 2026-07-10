@@ -1,11 +1,14 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
-import { auth, db } from "@/firebase";
+import { auth, db, storage } from "@/firebase";
+import { getCachedUserDoc, invalidateUserDoc } from "@/lib/user-doc-cache";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, updateProfile } from "firebase/auth";
+import { ref as sRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useDojoName } from "@/hooks/useDojoName";
 import Navigation, { BottomNavigation } from "@/components/Navigation";
 
@@ -89,6 +92,20 @@ export default function ProfileClient() {
   const [emergencyPhone, setEmergencyPhone] = useState("");
   const [notes, setNotes] = useState("");
 
+  // Profile photo
+  const [photoURL, setPhotoURL] = useState("");
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Password change (works for both members and staff; hidden for
+  // Google-only accounts, which have no password to change)
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newPassword2, setNewPassword2] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwError, setPwError] = useState("");
+  const [pwSuccess, setPwSuccess] = useState("");
+
   const dojoId = userProfile?.dojoId || userProfile?.staffProfile?.dojoId || userProfile?.studentProfile?.dojoId || "";
   const { dojoName } = useDojoName(dojoId);
 
@@ -122,12 +139,13 @@ export default function ProfileClient() {
       setError("");
 
       try {
-        const userSnap = await getDoc(doc(db, "users", user.uid));
+        const userSnap = await getCachedUserDoc(user.uid);
 
         if (userSnap.exists()) {
           const userData = userSnap.data() as UserProfile;
           setUserProfile(userData);
           setDisplayName(userData.displayName || userData.studentProfile?.fullName || "");
+          setPhotoURL((userData as any).photoURL || user.photoURL || "");
 
           const did = userData.dojoId || userData.staffProfile?.dojoId || userData.studentProfile?.dojoId;
           if (did) {
@@ -160,6 +178,96 @@ export default function ProfileClient() {
     load();
   }, [user, t]);
 
+  // Downscale to <=512px JPEG client-side so uploads stay tiny (~50-150KB)
+  // and avatars load instantly on member lists later.
+  const downscaleImage = (file: File): Promise<Blob> =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const max = 512;
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { reject(new Error("canvas unavailable")); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error("toBlob failed"))),
+          "image/jpeg",
+          0.85
+        );
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("image load failed")); };
+      img.src = url;
+    });
+
+  const handlePhotoSelected = async (file: File | null) => {
+    if (!file || !user || photoUploading) return;
+    setError(""); setSuccess("");
+    if (!file.type.startsWith("image/")) { setError(t("photoInvalidType")); return; }
+    if (file.size > 10 * 1024 * 1024) { setError(t("photoTooLarge")); return; }
+    setPhotoUploading(true);
+    try {
+      const blob = await downscaleImage(file);
+      const ref = sRef(storage, `profile-photos/${user.uid}/avatar.jpg`);
+      await uploadBytes(ref, blob, { contentType: "image/jpeg" });
+      const url = await getDownloadURL(ref);
+      await setDoc(doc(db, "users", user.uid), { photoURL: url, updatedAt: serverTimestamp() }, { merge: true });
+      await updateProfile(user, { photoURL: url }).catch(() => {});
+      invalidateUserDoc(user.uid);
+      setPhotoURL(url);
+      setSuccess(t("photoUpdated"));
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (e: any) {
+      console.error("[Profile][photo]", e);
+      setError(t("photoUploadFailed"));
+    } finally {
+      setPhotoUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const hasPasswordProvider = !!user?.providerData?.some(
+    (pd) => pd.providerId === "password"
+  );
+
+  const handleChangePassword = async () => {
+    if (pwSaving || !user?.email) return;
+    setPwError(""); setPwSuccess("");
+    if (!currentPassword) { setPwError(t("pwCurrentRequired")); return; }
+    if (newPassword.length < 6) { setPwError(t("pwTooShort")); return; }
+    if (newPassword !== newPassword2) { setPwError(t("pwMismatch")); return; }
+    setPwSaving(true);
+    try {
+      // Re-authenticate first: Firebase requires a recent login before
+      // updatePassword, and asking for the current password also protects
+      // an unattended logged-in session from a silent takeover.
+      const cred = EmailAuthProvider.credential(user.email, currentPassword);
+      await reauthenticateWithCredential(user, cred);
+      await updatePassword(user, newPassword);
+      setPwSuccess(t("passwordChanged"));
+      setCurrentPassword(""); setNewPassword(""); setNewPassword2("");
+    } catch (e: any) {
+      const code = e?.code ?? "";
+      if (code === "auth/wrong-password" || code === "auth/invalid-credential") {
+        setPwError(t("pwWrongCurrent"));
+      } else if (code === "auth/weak-password") {
+        setPwError(t("pwTooShort"));
+      } else if (code === "auth/too-many-requests") {
+        setPwError(t("pwTooMany"));
+      } else {
+        console.error("[Profile][password]", e);
+        setPwError(t("pwFailed"));
+      }
+    } finally {
+      setPwSaving(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!user) return;
     setSaving(true);
@@ -176,6 +284,7 @@ export default function ProfileClient() {
       }
 
       await setDoc(doc(db, "users", user.uid), userPatch, { merge: true });
+      invalidateUserDoc(user.uid); // profile changed — drop the cached copy
 
       if (dojoId) {
         const memberPatch: any = {
@@ -252,12 +361,40 @@ export default function ProfileClient() {
                 )}
               </div>
             </div>
-            <button
-              onClick={async () => { await auth.signOut(); router.replace("/login"); }}
-              className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
-            >
-              {t("signOut")}
-            </button>
+            <div className="flex flex-col items-center gap-2 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={photoUploading}
+                className="relative group"
+                title={t("changePhoto")}
+              >
+                {photoURL ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={photoURL} alt="" className="w-20 h-20 rounded-full object-cover border-2 border-gray-200" />
+                ) : (
+                  <div className="w-20 h-20 rounded-full bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center text-2xl text-gray-400">
+                    {displayName ? displayName.charAt(0).toUpperCase() : "📷"}
+                  </div>
+                )}
+                <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-medium">
+                  {photoUploading ? "..." : t("changePhoto")}
+                </div>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => handlePhotoSelected(e.target.files?.[0] ?? null)}
+              />
+              <button
+                onClick={async () => { await auth.signOut(); router.replace("/login"); }}
+                className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+              >
+                {t("signOut")}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -371,6 +508,50 @@ export default function ProfileClient() {
             className="px-4 py-2.5 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50">
             {saving ? t("saving") : t("saveProfile")}
           </button>
+        </div>
+
+        {/* Password change — self-contained, independent of profile save */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 space-y-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">{t("passwordSection")}</h2>
+          {!hasPasswordProvider ? (
+            <p className="text-sm text-gray-500">{t("googleNoPassword")}</p>
+          ) : (
+            <>
+              {pwError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{pwError}</div>
+              )}
+              {pwSuccess && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{pwSuccess}</div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t("currentPasswordLabel")}</label>
+                <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t("newPasswordLabel")}</label>
+                  <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+                    autoComplete="new-password"
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t("confirmNewPasswordLabel")}</label>
+                  <input type="password" value={newPassword2} onChange={(e) => setNewPassword2(e.target.value)}
+                    autoComplete="new-password"
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button onClick={handleChangePassword}
+                  disabled={pwSaving || !currentPassword || !newPassword || !newPassword2}
+                  className="px-4 py-2.5 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50">
+                  {pwSaving ? t("changingPassword") : t("changePassword")}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </main>
 

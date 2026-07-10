@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAuth } from "@/providers/AuthProvider";
 import { auth, db } from "@/firebase";
+import { getCachedUserDoc } from "@/lib/user-doc-cache";
 import { useDojoName } from "@/hooks/useDojoName";
 import { useWaiverStatus } from "@/hooks/useWaiverStatus";
 import { resolveDojoId, resolveIsStaff, type UserDocBase } from "@/lib/roles";
@@ -38,7 +39,7 @@ export default function HomePage() {
     setProfileBusy(true);
     setProfileErr("");
 
-    getDoc(doc(db, "users", user.uid))
+    getCachedUserDoc(user.uid)
       .then((snap) => {
         if (mounted) {
           setUserDoc(snap.exists() ? (snap.data() as UserDocBase) : null);
