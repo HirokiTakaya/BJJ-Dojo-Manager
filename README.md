@@ -1,107 +1,200 @@
 # BJJ Dojo Manager
 
-BJJ Dojo Manager is a full-stack web application built to help Brazilian Jiu-Jitsu academies manage their operations more efficiently.
+A full-stack web application built to help Brazilian Jiu-Jitsu academies manage their operations more efficiently.
 
-The platform is designed for dojo staff and members, with features for authentication, dojo management, announcements, scheduling, and role-based access control. It was built with a strong focus on practical product development, clean user flows, and real-world usability.
+🎥 **5-Minute Project Walkthrough**
+https://drive.google.com/file/d/1x8XTCB_DLLVl82zDQRwJX4Cj-_igyJPR/view?usp=sharing
 
-## Features
+🌐 **Live Demo**
+https://dojo-manager-94b96.web.app/
 
-- Secure user authentication
-- Email verification flow
-- Dojo creation and join flow
-- Role-based access control for staff and members
+💻 **GitHub Repository**
+https://github.com/HirokiTakaya/BJJ-Dojo-Manager
+
+---
+
+# Project Overview
+
+BJJ Dojo Manager is a full-stack web application designed specifically for Brazilian Jiu-Jitsu academies.
+
+As a Brazilian Jiu-Jitsu instructor, I experienced firsthand how much time coaches spend on repetitive administrative work such as member management, scheduling, attendance tracking, and communication.
+
+I built this application to centralize those workflows into a single platform so instructors can spend more time teaching and less time on administration.
+
+This project represents both my passion for Brazilian Jiu-Jitsu and my interest in building practical software that solves real-world problems.
+
+---
+
+# Why I Built This
+
+Many martial arts academies rely on spreadsheets, messaging apps, and multiple disconnected services.
+
+I wanted to create a platform that combines those workflows into a single system designed specifically for dojo operations.
+
+The project was also an opportunity to strengthen my experience in full-stack development by building an application from the ground up.
+
+---
+
+# Key Features
+
+- Secure authentication
+- Email verification
+- Role-based access control
+- Dojo creation & join flow
 - Member management
-- Announcements and internal communication
-- Class and timetable management
-- Firebase and Firestore integration
-- Backend API built with Go
-- Frontend built with Next.js and TypeScript
+- Class scheduling
+- Attendance management
+- Announcements
+- Firebase Authentication
+- Firestore integration
+- Go REST API
+- Responsive UI built with Next.js
 
-## Tech Stack
+---
 
-### Frontend
+# Tech Stack
+
+## Frontend
+
 - Next.js
 - React
 - TypeScript
 
-### Backend
+## Backend
+
 - Go
+- REST API
 
-### Backend / Database / Infrastructure
-- Firebase Authentication
+## Database
+
 - Firestore
-- Firebase Hosting
-- Cloud-based backend deployment
 
-## Project Structure
+## Authentication
+
+- Firebase Authentication
+
+## Infrastructure
+
+- Firebase Hosting
+- Firebase Cloud Services
+
+---
+
+# Architecture
+
+```
+Browser
+      │
+      ▼
+Next.js Frontend
+      │
+      ▼
+Go REST API
+      │
+      ├──────── Firebase Authentication
+      │
+      └──────── Firestore Database
+```
+
+---
+
+# Technical Highlights
+
+This project focuses on building production-oriented software.
+
+Some of the technical challenges included:
+
+- Authentication flow
+- Authorization
+- Role-based permissions
+- Firestore Security Rules
+- Backend/frontend communication
+- Scalable data structure
+- Clean user experience
+
+---
+
+# What I Learned
+
+Building this project improved my experience with:
+
+- Full-stack application architecture
+- React / Next.js
+- Go backend development
+- REST API design
+- Authentication & Authorization
+- Firestore Security Rules
+- Product thinking
+- User experience design
+
+Perhaps the biggest lesson was learning how software architecture evolves over time.
+
+Rather than trying to design everything perfectly from the beginning, I learned to build incrementally, refactor continuously, and improve the architecture as requirements became clearer.
+
+---
+
+# Future Improvements
+
+- Stripe subscription system
+- Payment management
+- Calendar synchronization
+- Push notifications
+- Mobile application
+- Instructor analytics
+- AI assistant for dojo management
+
+---
+
+# Local Development
+
+## Frontend
 
 ```bash
-BJJ-Dojo-Manager/
-├── backend/        # Go backend API
-├── frontend/       # Next.js frontend
-├── firestore.rules # Firestore security rules
-├── firebase.json   # Firebase configuration
-Why I Built This
-
-I built this project to solve real operational problems for martial arts academies.
-
-As someone deeply involved in Brazilian Jiu-Jitsu, I saw opportunities to improve how dojos manage members, communication, and daily workflows. Instead of relying on fragmented tools, I wanted to create a centralized platform tailored to the needs of a dojo environment.
-
-This project also allowed me to strengthen my full-stack development skills by working across frontend, backend, authentication, database design, and security rules.
-
-Technical Focus
-
-One of the key focuses of this project was designing a reliable authentication and access flow.
-
-I worked on:
-
-verified user flows
-permission-based access
-Firestore security rules
-backend and frontend coordination
-scalable structure for dojo-related actions
-
-This project reflects how I approach development:
-
-break down complex problems into smaller parts
-build working solutions incrementally
-improve architecture as requirements become clearer
-focus on both usability and maintainability
-What I Learned
-
-Through this project, I gained hands-on experience in:
-
-building a full-stack application from scratch
-connecting a React/Next.js frontend with a Go backend
-implementing authentication and authorization flows
-structuring Firestore data and security rules
-improving user flows based on real product needs
-Future Improvements
-Billing and subscription management
-More advanced scheduling tools
-Notifications and reminders
-Improved analytics for dojo staff
-Mobile-friendly feature expansion
-Run Locally
-Prerequisites
-Node.js
-Go
-Firebase project setup
-Frontend
 cd frontend
 npm install
 npm run dev
-Backend
+```
+
+## Backend
+
+```bash
 cd backend
 go mod tidy
 go run .
-Notes
+```
 
-This project is part of my portfolio and represents my interest in building practical, production-oriented software that solves real problems.
+---
 
-Author
+# Project Structure
 
-Hiroki Takaya
-GitHub: https://github.com/HirokiTakaya
+```
+BJJ-Dojo-Manager
+│
+├── backend
+├── frontend
+├── firestore.rules
+├── firebase.json
+└── README.md
+```
+
+---
+
+# About Me
+
+I'm a Full-Stack Software Engineer and Brazilian Jiu-Jitsu Black Belt based in Vancouver, Canada.
+
+I enjoy building software that solves real problems by combining technical skills with practical experience.
+
+---
+
+# Contact
+
+**Hiroki Takaya**
+
+GitHub:
+https://github.com/HirokiTakaya
+
+LinkedIn:
+https://www.linkedin.com/in/hiroki-takaya-85b757267/
 
 
